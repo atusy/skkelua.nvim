@@ -432,3 +432,21 @@ t.test("| is converted in zenkaku mode", function()
 		t.assert_equals({ "｜" }, vim.fn.getline(1, "$"))
 	end)
 end)
+
+t.test("< is inserted as a raw symbol", function()
+	with_buffer(function()
+		-- < はかなテーブルの <s-l> (L → zenkaku) に前方一致して feed に溜まり、
+		-- 次のキーで捨てられて消えていた (回帰テスト)
+		feed("iJa<lt>i")
+		t.assert_equals({ "あ<い" }, vim.fn.getline(1, "$"))
+	end)
+end)
+
+t.test("< is converted immediately in zenkaku mode", function()
+	with_buffer(function()
+		-- 以前は rom_zen の <s-a>〜<s-z> にも前方一致して feed に残り、
+		-- 次のキーが来るまで生の < が表示されていた
+		feed("iJL<lt>")
+		t.assert_equals({ "＜" }, vim.fn.getline(1, "$"))
+	end)
+end)

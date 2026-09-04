@@ -89,6 +89,23 @@ function M.accept_result(context, result, feed)
 	end
 end
 
+--- テーブルのキーが next_feed で始まるか
+--- 生の "<" は <s-x> (shift 表記) の先頭とは一致させない。shift 表記は常に
+--- "<s-x>" 丸ごと char として渡るため、char == "<" は必ず生の文字。
+--- (rom_hira の "<s-l>" (L → zenkaku) に "<" が前方一致して feed に溜まり、
+---  次のキーで捨てられて "<" が消えるのを防ぐ)
+---@param entry_key string
+---@param next_feed string
+---@param char string
+---@return boolean
+local function matches_feed(entry_key, next_feed, char)
+	if not util.starts_with(entry_key, next_feed) then
+		return false
+	end
+	-- next_feed の末尾が char なので、<s- トークンが始まるなら位置は #next_feed
+	return not (char == "<" and entry_key:sub(#next_feed, #next_feed + 2) == "<s-")
+end
+
 --- かな入力の中心ロジック
 ---@param context skkelua.Context
 ---@param char string
@@ -126,7 +143,7 @@ function M.kana_input(context, char)
 	local next_feed = state.feed .. char
 	local found = {}
 	for _, e in ipairs(state.table) do
-		if util.starts_with(e[1], next_feed) then
+		if matches_feed(e[1], next_feed, char) then
 			found[#found + 1] = e
 		end
 	end

@@ -218,3 +218,31 @@ t.test("new line (integration)", function()
 	vim.cmd("iunmap J")
 	vim.cmd.bwipeout({ bang = true })
 end)
+
+t.test("raw < is not swallowed by <s-x> table entries", function()
+	-- "<" が rom_hira の "<s-l>" (L → zenkaku) に前方一致して feed に溜まり、
+	-- 次のキーで捨てられていた
+	do
+		local context = new_context()
+		t.dispatch(context, "a<i")
+		t.assert_equals("あ<い", context.preEdit:output(""))
+	end
+	do
+		local context = new_context()
+		t.dispatch(context, "<<")
+		t.assert_equals("<<", context.preEdit:output(""))
+	end
+	do
+		-- 生の < と shift の L (zenkaku) は共存する
+		local context = new_context()
+		t.dispatch(context, "<La")
+		t.assert_equals("<ａ", context.preEdit:output(""))
+	end
+end)
+
+t.test("custom table entries starting with < still match by prefix", function()
+	require("skkelua.kana").register_kana_table("rom", { ["<3"] = { "♥", "" } })
+	local context = new_context()
+	t.dispatch(context, "<3")
+	t.assert_equals("♥", context.preEdit:output(""))
+end)
