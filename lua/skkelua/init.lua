@@ -176,10 +176,11 @@ local function handle_impl(opts, vim_status)
 	if not is_opts(opts) then
 		error("invalid opts: " .. vim.inspect(opts))
 	end
+	-- 実キー / 表記 / 大文字混じり表記 (<Bar>, <C-J> など) を全て
+	-- 小文字の表記に揃える (keymap や notation のテーブルは小文字で持っている)
 	local key_list = {}
 	for _, key in ipairs(opts.key) do
-		local real_key = notation.notation_to_key[key]
-		key_list[#key_list + 1] = (real_key and notation.key_to_notation[real_key]) or key
+		key_list[#key_list + 1] = notation.normalize(key)
 	end
 	local context = store.get_context()
 	context.vimMode = vim_status.mode
@@ -355,19 +356,12 @@ end
 ---@param opts? { key?: string|string[], function?: string, expr?: boolean }
 ---@return string? opts.expr が真の場合は送出すべきキー列を返す
 function M.handle(func, opts)
-	local notation = require("skkelua.notation")
 	opts = vim.deepcopy(opts or {})
-	-- normalize opts.key and convert key to notation
+	-- opts.key を配列に揃える (表記の正規化は handle_impl で行う)
 	local key = opts.key
 	if type(key) == "string" then
-		opts.key = { notation.key_to_notation[key] or key }
-	elseif type(key) == "table" then
-		local keys = {}
-		for _, k in ipairs(key) do
-			keys[#keys + 1] = notation.key_to_notation[k] or k
-		end
-		opts.key = keys
-	else
+		opts.key = { key }
+	elseif type(key) ~= "table" then
 		opts.key = { "" }
 	end
 
@@ -490,12 +484,12 @@ function M.map()
 
 	local mapped_keys = require("skkelua.config").config.mappedKeys or M.get_default_mapped_keys()
 	for _, c in ipairs(mapped_keys) do
-		local k
-		if #c > 1 and c:sub(1, 1) == "<" and c:lower() ~= "<bar>" then
-			k = notation.key_to_notation[termcode(c)] or c:lower()
-		else
-			k = c
-		end
+		-- Note: skkeleton (Vimscript 版) は :map の RHS に埋め込んだ <Bar> が
+		--       マッピングエンジンで | に変換されるため <bar> だけ正規化を除外
+		--       していたが、Lua クロージャに文字列を渡す skkelua では不要。
+		--       除外すると "<Bar>" (大文字) が小文字表記のテーブルに当たらず、
+		--       shift 入力扱いの上 "<bar>" がそのまま挿入されてしまう
+		local k = notation.normalize(c)
 		local func = "handleKey"
 		local plug = vim.fn.maparg(c, mode):match("<Plug>%(skkelua%-(%a+)%)")
 		if plug then

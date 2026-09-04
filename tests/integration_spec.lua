@@ -399,3 +399,36 @@ t.test("nested registration via the float prompt", function()
 		error(err, 0)
 	end
 end)
+
+t.test("| is inserted as a raw symbol", function()
+	with_buffer(function()
+		-- <Bar> は "<Bar>" (大文字) のまま流れて小文字表記のテーブルに当たらず、
+		-- shift 入力扱いで ▽ が立った上 "<bar>" と挿入されていた (回帰テスト)
+		feed("iJa<Bar>i")
+		t.assert_equals({ "あ|い" }, vim.fn.getline(1, "$"))
+	end)
+end)
+
+t.test("| during henkan is appended to the midasi or inserted after kakutei", function()
+	local lib = require("skkelua.store").get_library()
+	lib:register_henkan_result("okurinasi", "かんじ", "漢字")
+
+	with_buffer(function()
+		-- ▽ 状態: shift 入力扱いされて送り仮名開始 (*) に化けていた
+		feed("iJKanji<Bar>")
+		t.assert_equals({ "▽かんじ|" }, vim.fn.getline(1, "$"))
+	end)
+
+	with_buffer(function()
+		-- ▼ 状態: 候補を確定してから | が入る
+		feed("iJKanji <Bar>")
+		t.assert_equals({ "漢字|" }, vim.fn.getline(1, "$"))
+	end)
+end)
+
+t.test("| is converted in zenkaku mode", function()
+	with_buffer(function()
+		feed("iJL<Bar>")
+		t.assert_equals({ "｜" }, vim.fn.getline(1, "$"))
+	end)
+end)

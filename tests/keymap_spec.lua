@@ -75,3 +75,32 @@ t.test("send multiple keys into handleKey", function()
 	skkelua._handle_request("handleKey", { key = { "O", "m", "o", "U" } }, vim_status)
 	t.assert_equals("▼思う", store.get_context():to_string())
 end)
+
+t.test("handle normalizes mixed-case notation", function()
+	t.clean_dictionary_config()
+	local skkelua = require("skkelua")
+	local store = require("skkelua.store")
+	local lib = store.get_library()
+	lib:register_henkan_result("okurinasi", "あ", "亜")
+	lib:register_henkan_result("okurinasi", "あ", "阿")
+
+	-- "<Bar>" は小文字表記のテーブルに当たらず、そのまま挿入されていた
+	local ret = skkelua._handle_request("handleKey", { key = { "<Bar>" } }, {
+		mode = "",
+		prevInput = "",
+		completeInfo = {},
+		completeType = "",
+	})
+	t.assert_equals("|", ret.result)
+
+	store.init_context()
+
+	-- keymap の lookup も大文字混じり表記で当たる (<Space> -> henkanForward)
+	handle_key("A")
+	handle_key(" ")
+	local first = store.get_context():to_string()
+	handle_key("<Space>")
+	local second = store.get_context():to_string()
+	t.assert_true(first ~= second, ("first=%s second=%s"):format(first, second))
+	t.assert_equals("▼亜", second)
+end)
