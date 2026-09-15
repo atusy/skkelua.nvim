@@ -149,6 +149,7 @@ denops 版との主な違い:
 | ユーザー辞書デフォルト | `~/.skkeleton` | `stdpath("data")/skkelua/jisyo` |
 | 辞書ロード | 非同期 | 同期 (SKK-JISYO.L 規模で数百 ms、初回のみ) |
 | 辞書形式 | SKK/JSON/YAML/msgpack/Deno KV | SKK/JSON/msgpack |
+| 変換ごとの undo 区切り (`setUndoPoint`) | デフォルト有効 | デフォルト無効 |
 | SKK サーバー | 非同期 TCP | 同期 TCP (タイムアウト 1 秒) |
 | Google 日本語入力 | fetch | curl |
 | ddc.vim ソース | 同梱 | 非同梱 (補完用 Lua API を提供) |

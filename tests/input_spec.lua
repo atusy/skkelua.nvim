@@ -98,6 +98,15 @@ t.test("delete char", function()
 end)
 
 t.test("undo point", function()
+	-- not emit by default (setUndoPoint = false)
+	do
+		local context = new_context()
+		context.vimMode = "i"
+		t.dispatch(context, "a")
+		require("skkelua.function.input").henkan_point(context)
+		t.assert_equals("あ▽", context.preEdit:output(context:to_string()))
+	end
+	require("skkelua.config").config.setUndoPoint = true
 	do
 		local context = new_context()
 		context.vimMode = "i"

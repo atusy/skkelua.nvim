@@ -241,8 +241,12 @@ registerConvertResult (false)
 	カタカナ変換等の結果をユーザー辞書に登録するかどうか。
 selectCandidateKeys ("asdfjkl")
 	候補選択ポップアップのキー (7 文字)。
-setUndoPoint (true)
-	変換ポイントで undo を切るかどうか。
+setUndoPoint (false)
+	変換ポイントで undo を切るかどうか。有効にすると、▽ に入る直前と
+	変換候補の確定直後 (および ▽ 中の q / <C-q> によるカナ変換の直後)
+	に <C-g>u を送り、変換 1 回分が独立した undo 単位になります。
+	無効 (デフォルト) では Neovim 標準どおり insert モード 1 回分が
+	1 つの undo 単位になります。
 showCandidatesCount (4)
 	インライン候補表示の個数。超えるとポップアップ表示になります。
 skkServerHost ("127.0.0.1") / skkServerPort (1178)
@@ -463,5 +467,7 @@ skkeleton (denops 版) との違い:
   補完ソースを実装できます。
 - skkserv への問い合わせは同期実行で、応答が無い場合 1 秒でタイムアウト
   します。
+- setUndoPoint のデフォルトは false です (skkeleton は true)。変換ごとに
+  undo を区切りたい場合は明示的に有効にしてください。
 
 vim:tw=78:ts=8:noet:ft=help:norl:
