@@ -247,6 +247,14 @@ setUndoPoint (false)
 	に <C-g>u を送り、変換 1 回分が独立した undo 単位になります。
 	無効 (デフォルト) では Neovim 標準どおり insert モード 1 回分が
 	1 つの undo 単位になります。
+setUndoPointOnPaste (true)
+	skkelua が有効な insert モード中の貼り付け (ターミナルの bracketed
+	paste や GUI の貼り付けなど |vim.paste()| を通るもの) の直前で undo を
+	区切るかどうか。Neovim 標準では貼り付けは進行中の insert の undo
+	ブロックに合流するため、日本語入力の途中で貼り付けると undo 一回で
+	それまでの入力ごと消えてしまいます。有効にすると貼り付け以降が独立
+	した undo 単位になります。insert モードの <C-r> によるレジスタ挿入は
+	対象外です。
 showCandidatesCount (4)
 	インライン候補表示の個数。超えるとポップアップ表示になります。
 skkServerHost ("127.0.0.1") / skkServerPort (1178)

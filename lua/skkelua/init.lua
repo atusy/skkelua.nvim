@@ -262,6 +262,7 @@ local function enable(opts, vim_status)
 	M.map()
 	store.status.enabled = true
 	require("skkelua.guard").attach()
+	require("skkelua.paste").attach()
 	local mode_fn = require("skkelua.function").mode_functions()[store.variables.lastMode]
 	if mode_fn then
 		mode_fn(context, "")

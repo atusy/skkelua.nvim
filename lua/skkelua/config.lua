@@ -99,6 +99,8 @@ M.config = {
 	registerConvertResult = false,
 	selectCandidateKeys = "asdfjkl",
 	setUndoPoint = false,
+	-- 日本語入力中の貼り付け (vim.paste) の直前で undo を区切る
+	setUndoPointOnPaste = true,
 	showCandidatesCount = 4,
 	skkServerHost = "127.0.0.1",
 	skkServerPort = 1178,
@@ -235,6 +237,7 @@ local validators = {
 		return keys
 	end,
 	setUndoPoint = ensure_bool("setUndoPoint"),
+	setUndoPointOnPaste = ensure_bool("setUndoPointOnPaste"),
 	showCandidatesCount = ensure_number("showCandidatesCount"),
 	skkServerHost = ensure_string("skkServerHost"),
 	skkServerPort = ensure_number("skkServerPort"),
