@@ -45,25 +45,37 @@ local function extra_physical_keys()
 	return extra_physical
 end
 
--- pum 表示中でも補完の操作として意味を持つキー
--- (<C-n>/<C-p>/<C-e>/<C-y> は単バイト制御キー側の破棄対象なのでここで救う)
+--- 表記のリストを termcode 化した集合として返す関数を作る (初回のみ生成)
+---@param names string[]
+---@return fun(): table<string, boolean>
+local function key_set(names)
+	---@type table<string, boolean>?
+	local set
+	return function()
+		if not set then
+			set = {}
+			for _, n in ipairs(names) do
+				set[termcode(n)] = true
+			end
+		end
+		return set
+	end
+end
+
+-- 補完を開始・操作するキー (単バイト制御キー側の破棄対象なのでここで救う)。
+-- pum 表示中は候補の移動、非表示なら 'complete' に従って補完を開き直す。
+-- pre-edit 中に <C-e> で pum を閉じた後も <C-n> で再表示できる必要があるため、
+-- pum の表示有無に関係なく通す。ins-completion は insert モード限定で、
+-- cmdline の <C-n>/<C-p> は履歴の呼び出しになって pre-edit を壊すので
+-- insert モードでのみ通す
+local completion_keys = key_set({ "<c-n>", "<c-p>" })
+
+-- pum 表示中の候補操作キー (cmdline の wildmenu も含む)
 -- Note: <C-y> は skkelua 自身も feed する: [辞書登録] 項目の確定では
 --       native_confirm_key が raw <C-y> を feedkeys し、しかも登録フローへ
 --       繋ぐため state は非 direct のまま保たれる。ここで通さないと
 --       辞書登録を <C-y> で確定できなくなる
----@type table<string, boolean>?
-local pum_nav
----@return table<string, boolean>
-local function pum_nav_keys()
-	if pum_nav then
-		return pum_nav
-	end
-	pum_nav = {}
-	for _, n in ipairs({ "<up>", "<down>", "<pageup>", "<pagedown>", "<c-n>", "<c-p>", "<c-e>", "<c-y>" }) do
-		pum_nav[termcode(n)] = true
-	end
-	return pum_nav
-end
+local pum_nav_keys = key_set({ "<up>", "<down>", "<pageup>", "<pagedown>", "<c-n>", "<c-p>", "<c-e>", "<c-y>" })
 
 -- skkelua 自身が pre-edit の更新のために feed する制御バイト
 -- (<C-g>u の undo 区切り、\b による削除、改行・Tab・Esc)。
@@ -137,17 +149,22 @@ function M._on_key(key, _)
 		-- pre-edit を表示していない直接入力中はキー本来の動作に任せる
 		return
 	end
-	-- 補完ポップアップ表示中は候補選択キーだけを通す。pre-edit 中は補完が
-	-- 自動で pum を開く構成が普通 (lsp.lua は候補が無くても [辞書登録] 項目
-	-- で pum を開く) なので、pum 表示中の全面バイパスはゲートを実質無効化
-	-- してしまう。選択挿入などでバッファが変わるケースは既存の補完リカバリ
-	-- (prevInput 不一致リセット) が面倒を見る
+	-- 補完の開始・操作は Neovim 標準の ins-completion に任せて通す。pre-edit
+	-- 中は補完が自動で pum を開く構成が普通 (lsp.lua は候補が無くても [辞書登録]
+	-- 項目で pum を開く) なので、pum 表示中の全面バイパスはゲートを実質無効化
+	-- してしまう。通すのは補完として意味を持つキーに限る。選択挿入などで
+	-- バッファが変わるケースは既存の補完リカバリ (prevInput 不一致リセット)
+	-- が面倒を見る
+	local mode = vim.api.nvim_get_mode().mode
+	if mode:sub(1, 1) == "i" and completion_keys()[key] then
+		return
+	end
 	if vim.fn.pumvisible() == 1 and pum_nav_keys()[key] then
 		return
 	end
 	-- pre-edit 状態のまま insert を抜けた場合 (stopinsert など) に
 	-- ノーマルモードのキーまで食わないための保険
-	local mode = vim.api.nvim_get_mode().mode:sub(1, 1)
+	mode = mode:sub(1, 1)
 	if mode ~= "i" and mode ~= "c" and mode ~= "t" then
 		return
 	end

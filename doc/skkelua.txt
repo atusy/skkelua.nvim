@@ -334,7 +334,9 @@ pureSpace (|skkelua-options|) も合わせて有効にすると快適です。
   プロンプトです
 
 Note: 表示中の補完メニューの操作 (CTRL-N/CTRL-P) は Neovim 標準の
-ins-completion です。CTRL-Y はデフォルトで skkelua が処理し、候補選択済み
+ins-completion です。CTRL-E で閉じた後も CTRL-N/CTRL-P は pre-edit 中に通り、
+'complete' に従って補完を開き直せます (skkelua の候補を出すには 'complete' に
+"o" を含めます)。CTRL-Y はデフォルトで skkelua が処理し、候補選択済み
 なら補完の確定へパススルー、未選択ならかな確定になります
 (kakuteiPassThrough)。mappedKeys やバッファローカルマップで CTRL-N/CTRL-P
 を skkelua に割り当てている場合は、|pumvisible()| で分岐してください。

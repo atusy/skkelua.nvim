@@ -92,6 +92,23 @@ t.test("<C-n> still navigates pum during pre-edit", function()
 	end)
 end)
 
+t.test("<C-n> reopens completion after <C-e> closed the pum during pre-edit", function()
+	with_buffer(function()
+		vim.opt_local.completeopt = "menuone,noselect"
+		vim.cmd("inoremap <buffer> <C-t> <Cmd>call complete(col('.'), ['候補一', '候補二'])<CR>")
+		-- <C-n> の keyword 補完がマッチするよう、pre-edit と同じ読みで始まる語を置く
+		vim.fn.setline(1, { "", "かんじろう" })
+		local after
+		vim.keymap.set("i", "<C-b>", function()
+			after = { pum = vim.fn.pumvisible(), line = vim.fn.getline(1), phase = require("skkelua.store").status.phase }
+		end, { buffer = true })
+		-- <C-e> で pum を閉じると pumvisible() は 0 になるが、<C-n> は補完の
+		-- 開き直しとして通す (以前は敵対的な制御キーとして破棄されていた)
+		feed("iJKanji<C-t><C-e><C-n><C-b>")
+		t.assert_equals({ pum = 1, line = "▽かんじ", phase = "input:okurinasi" }, after)
+	end)
+end)
+
 t.test("<C-y> confirms the register completion item", function()
 	with_buffer(function()
 		vim.opt_local.completeopt = "menuone,noselect"
