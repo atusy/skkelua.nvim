@@ -72,13 +72,13 @@ end
 ---@field type skkelua.HenkanType
 ---@field affix? skkelua.AffixType
 ---@field rank? number 並び順の決定に使うランク (大きいほど上)
----@field raw? boolean 辞書由来でない入力そのままの候補 (登録・purge の対象外)
+---@field raw? boolean 辞書由来でない候補 (abbrev の半角スペース + 入力。登録・purge の対象外)
 
 --- 送りなし変換入力 (▽かんじ) の候補: 見出しの前方一致検索
 --- (@ddc-sources/skkeleton の gather に相当)。
 --- ユーザー辞書で確定済みの候補 (ランク持ち) を確定が新しい順に先頭へ置き、
 --- 残りは見出しの辞書順で並べる。
---- abbrev モードでは入力そのものと半角スペース前置形を末尾に足す
+--- abbrev モードでは入力の半角スペース前置形を末尾に足す
 ---@return skkelua.LspCandidate[]
 local function okurinasi_candidates()
 	local skkelua = require("skkelua")
@@ -110,10 +110,11 @@ local function okurinasi_candidates()
 	end)
 	local context = require("skkelua.store").get_context()
 	if context.mode == "abbrev" then
+		-- 入力したアルファベットの前に半角スペースを足したもの (英単語を
+		-- 和文の中に空けて入れる用)。入力そのものは <C-y> の無変換確定で
+		-- 入るので候補には並べない
 		local feed = context.state.henkanFeed
-		for _, word in ipairs({ feed, " " .. feed }) do
-			result[#result + 1] = { word = word, midasi = feed, okuri = "", type = "okurinasi", raw = true }
-		end
+		result[#result + 1] = { word = " " .. feed, midasi = feed, okuri = "", type = "okurinasi", raw = true }
 	end
 	return result
 end
@@ -484,7 +485,7 @@ function M._on_complete_done(reason, completed_item)
 		end)
 		return
 	end
-	-- 入力そのままの候補 (abbrev の raw 候補) は辞書へ登録しない
+	-- abbrev の raw 候補 (半角スペース + 入力) は辞書へ登録しない
 	if data.raw then
 		return
 	end

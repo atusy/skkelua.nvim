@@ -634,7 +634,7 @@ t.test("complete_callback registers the selected candidate", function()
 	vim.cmd.bwipeout({ bang = true })
 end)
 
-t.test("abbrev input adds raw input candidates at the bottom", function()
+t.test("abbrev input adds a space-prefixed raw candidate at the bottom", function()
 	local skkelua = require("skkelua")
 	local lib = require("skkelua.store").get_library()
 	lib:register_henkan_result("okurinasi", "overall", "全体")
@@ -652,15 +652,13 @@ t.test("abbrev input adds raw input candidates at the bottom", function()
 	for _, item in ipairs(list.items) do
 		labels[#labels + 1] = item.label
 	end
-	-- 辞書候補の後、[辞書登録] の前に、入力そのもの + スペース前置形が並ぶ
-	t.assert_equals({ "全体", "overall", " overall", "[辞書登録]" }, labels)
+	-- 辞書候補の後、[辞書登録] の前に、スペース前置形だけが並ぶ
+	-- (入力そのものは <C-y> の無変換確定で入るので候補にしない)
+	t.assert_equals({ "全体", " overall", "[辞書登録]" }, labels)
 
 	local raw = list.items[2]
-	t.assert_equals("overall", raw.textEdit.newText)
+	t.assert_equals(" overall", raw.textEdit.newText)
 	t.assert_equals(true, raw.data.raw)
-	local spaced = list.items[3]
-	t.assert_equals(" overall", spaced.textEdit.newText)
-	t.assert_equals(true, spaced.data.raw)
 
 	-- raw 候補の確定ではユーザー辞書に登録されない
 	require("skkelua.lsp")._on_complete_done("accept", {
@@ -671,10 +669,11 @@ t.test("abbrev input adds raw input candidates at the bottom", function()
 	vim.cmd.bwipeout({ bang = true })
 end)
 
-t.test("abbrev raw candidate is deduped against dictionary candidates", function()
+t.test("abbrev keeps a dictionary candidate equal to the input and adds only the spaced raw", function()
 	local skkelua = require("skkelua")
 	local lib = require("skkelua.store").get_library()
-	-- 入力そのものと同じ文字列が辞書候補として既にある場合は重複させない
+	-- 入力そのものが辞書候補として既にある場合も、そのまま辞書候補として並び
+	-- raw 候補はスペース前置形だけが追加される
 	lib:register_henkan_result("okurinasi", "ov", "ov")
 	skkelua.config({ completion = { enabled = true } })
 	skkelua._handle_request("enable", {}, vim_status)
