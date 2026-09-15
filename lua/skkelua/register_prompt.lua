@@ -38,6 +38,13 @@ end
 --- entry のプロンプトを閉じる (コールバックは呼ばない)
 --- Note: WinClosed 経由で schedule 済みの finish を無効化するため、
 ---       ウィンドウを閉じる前に done を立てる
+--- Note: ウィンドウとバッファの破棄は schedule して行う。prompt_setcallback
+---       のコールバック内 (<CR> の処理中) で同期的にウィンドウを閉じると、
+---       Neovim は prompt buffer の <CR> 処理の途中で復帰先バッファへ
+---       切り替わったまま insert を抜け、その復帰先バッファの undo 履歴を
+---       全て捨ててしまう (登録前の入力が undo できなくなる)。
+---       スタックの更新と done は同期のままなので、_current() などの
+---       状態は即時に反映される
 ---@param entry skkelua.RegisterPromptEntry
 local function close(entry)
 	local i = index_of(entry)
@@ -47,8 +54,10 @@ local function close(entry)
 	table.remove(stack, i)
 	entry.done = true
 	vim.cmd("stopinsert")
-	pcall(vim.api.nvim_win_close, entry.win, true)
-	pcall(vim.api.nvim_buf_delete, entry.buf, { force = true })
+	vim.schedule(function()
+		pcall(vim.api.nvim_win_close, entry.win, true)
+		pcall(vim.api.nvim_buf_delete, entry.buf, { force = true })
+	end)
 end
 
 --- entry より内側 (上) に積まれたプロンプトをコールバック無しで破棄する。
