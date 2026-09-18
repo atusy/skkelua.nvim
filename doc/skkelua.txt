@@ -143,6 +143,8 @@ require("skkelua").get_default_mapped_keys()
 
 補完プラグイン連携用 API ~
                                                   *skkelua-completion-api*
+外部補完の接続は |skkelua-completion-extension| を参照してください。
+
 require("skkelua").get_pre_edit()
 	現在のプリエディット文字列を返します。
 require("skkelua").get_pre_edit_length()
@@ -185,7 +187,9 @@ config() に渡せる主なオプション (括弧内はデフォルト値):
 acceptIllegalResult (false)
 	かなに変換できなかった入力をそのまま残すかどうか。
 completion ({ enabled = false })
-	変換候補の builtin LSP 補完。|skkelua-completion| 参照。
+	変換候補の builtin LSP 補完を設定します。
+	cmp / pum.vim の確定キー連携は、この設定に関係なく利用できます。
+	|skkelua-completion| 参照。
 completionRankFile ("")
 	補完候補ランクの保存先ファイル。設定すると補完候補の並び順
 	(確定が新しい候補ほど上、|skkelua-completion| 参照) が
@@ -345,6 +349,84 @@ Note: |vim.lsp.completion.enable()| は最初にバッファの補完状態を�
 呼び出しの opts で動作が固定されます。skkelua が有効なバッファに対して
 他の設定・プラグインが opts 無しで enable(true) を呼ぶと、skkelua の
 autotrigger が失われて候補が自動表示されなくなります。
+
+外部補完との接続                               *skkelua-completion-extension*
+
+外部プラグインは候補生成・確定処理を再実装せず、以下の API を利用できます。
+UI の表示、絞り込み、キー設定、LSP client の起動・停止は外部側が所有します。
+組み込み UI と併用しない場合は completion.enabled = false にしてください。
+この設定は組み込み補完だけを無効にし、以下の API は利用できます。
+cmp / pum.vim の自動検出と確定連携は設定に関係なく有効です。
+
+require("skkelua.completion").get({context})
+	現在の SKK 状態から LSP CompletionList を返します。context は
+	{ line = 行の全文, row = 0 始まりの行番号, col = 0 始まりのバイト位置 }
+	です。文字位置は UTF-8 で、Insert バッファにもコマンドラインにも
+	使えます。渡したカーソルの直前が現在の pre-edit と一致しない場合や
+	SKK 無効時は空の items を返します。要求対象が現在の SKK 入力先かは
+	呼び出し側で判定してください (SKK 状態は文書ごとではありません)。
+	送りなし・送りあり・変換中・abbrev の候補、注釈、学習順、辞書登録項目
+	を共通で生成します。'completeopt' や UI、カーソルには触れません。
+	textEdit は pre-edit 全体を置換する PlainText です。候補の表示順には
+	sortText を使い、data を確定時まで保持してください。
+
+require("skkelua.completion").accept({item})
+	実際に確定した元の LSP CompletionItem を一度だけ渡してください。
+	通常候補を学習し、abbrev の入力そのままの候補は学習から除外します。
+	辞書登録項目は次のイベントループで SKK の登録プロンプトを開きます。
+	SKK の項目なら true、それ以外なら false を返します。
+	textEdit の適用は UI 側の責務です。選択・キャンセル時は呼ばず、
+	確定イベントで呼びます。登録項目は pre-edit と入力モードを保持して
+	確定してください。古い候補への遅延した確定通知は渡さないでください。
+
+require("skkelua.lsp").new_server({get_context}?)
+	|vim.lsp.start()| の cmd に渡す in-process LSP transport を返します。
+	UI は有効化せず、LSP の位置エンコーディングは UTF-8 です。
+	既定では要求 URI のロード済み名前付きバッファと params.position を使います。
+	匿名バッファ・仮想文書・コマンドラインでは get_context(params) から get() と同じ
+	context を返せます。対象外の要求には nil を返してください。
+	文書同期通知を蓄積するサーバーではありません。文書の内容は要求処理時に
+	バッファまたは get_context から読みます。
+>lua
+	require("skkelua").config({ completion = { enabled = false } })
+	local client_id = vim.lsp.start({
+		name = "skkelua-external",
+		cmd = require("skkelua.lsp").new_server(),
+	}, { bufnr = vim.api.nvim_get_current_buf() })
+<
+	外部側で必要なバッファに attach し、SKK 無効時には補完要求を止めます。
+	ライフサイクル連携には |skkelua-autocmds| を利用できます。確定時の
+	accept() 呼び出しは LSP を利用する場合も外部側で接続してください。
+
+require("skkelua.completion").set_adapter({adapter}?)
+	補完 UI への接続を一つ登録します。明示的な登録は自動検出より優先されます。
+	nil で登録を解除し、cmp / pum.vim の自動検出に戻します。
+	候補取得だけなら不要ですが、SKK の確定キー・選択挿入・辞書登録後の
+	再補完と協調する場合に必要です。adapter は以下の関数を持ちます。
+
+	state(): { visible: boolean, selected?: { word: string, item: table } }
+		現在の UI 状態を返します。未選択なら selected を省略します。
+		item は元の LSP CompletionItem (他ソースの項目でも可)、word は
+		選択によって挿入済みの文字列です。未挿入なら空文字にします。
+		この情報は確定キー、選択挿入中の削除・接尾辞・purge、補完中の
+		移動キーの判定に使います。UI 非表示時は visible = false を返します。
+	confirm(): string
+		選択を確定するキー列を返します。その場でバッファを変更しないで
+		ください。戻り値は展開済みのキーコード (例: "\25") です。
+		コマンドなら nvim_replace_termcodes() で <Cmd>...<CR> を変換します。
+	trigger(): nil (省略可)
+		辞書登録のキャンセルなどで pre-edit が復元された際に補完を要求します。
+
+	アダプターの登録は SKK の有効・無効や completion.enabled と独立です。
+	同じ補完 UI を使い続ける場合は一度登録すれば十分です。nil を渡すのは
+	明示的な連携を解除するときです。キャンセル処理や
+	キーの保存・復元は外部側で管理します。
+
+設定の選び方:
+	completion.enabled は組み込み補完の有効・無効だけを制御します。
+	cmp / pum.vim の自動検出と確定連携は設定に関係なく利用できます。
+	自動検出を置き換える場合は set_adapter() で明示的に登録します。低水準 API
+	(get_completion_result / complete_callback など) も引き続き使えます。
 
 ==============================================================================
 INDICATOR                                                  *skkelua-indicator*
