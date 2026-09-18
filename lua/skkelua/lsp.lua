@@ -165,6 +165,7 @@ local function make_completion_list()
 			-- its insertion word falls back to filterText.
 			item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet
 			item.textEdit.newText = escape_snippet(item.textEdit.newText)
+			item.insertText = item.textEdit.newText
 		end
 	end
 	return list
@@ -262,38 +263,76 @@ local function create_server(complete)
 	end
 end
 
---- Create a transport for vim.lsp.start(). Never enables a completion UI.
---- get_context can resolve virtual documents; nil means no active input there.
----@param get_context? fun(params: table): {line: string, row: integer, col: integer}?
----@return fun(dispatchers: table): table
-function M.new_server(get_context)
-	local function complete(params)
-		if get_context then
-			local context = get_context(params)
-			return context and require("skkelua.completion").get(context) or { isIncomplete = true, items = {} }
-		end
-		local buf
+--- Read a request position from a loaded buffer without opening documents.
+--- When bufnr is supplied, the caller is responsible for validating the URI.
+---@param params table LSP completion params; character is a UTF-8 byte offset.
+---@param bufnr? integer Explicit backing buffer for a virtual document or URI alias.
+---@return {line: string, row: integer, col: integer}? context
+---@return integer? bufnr
+function M.get_context(params, bufnr)
+	if bufnr == 0 then
+		bufnr = vim.api.nvim_get_current_buf()
+	end
+	if bufnr == nil then
 		for _, candidate in ipairs(vim.api.nvim_list_bufs()) do
 			if
 				vim.api.nvim_buf_is_loaded(candidate)
 				and vim.api.nvim_buf_get_name(candidate) ~= ""
 				and vim.uri_from_bufnr(candidate) == params.textDocument.uri
 			then
-				buf = candidate
+				bufnr = candidate
 				break
 			end
 		end
-		if not buf then
-			return { isIncomplete = true, items = {} }
+		if bufnr == nil and vim.uri_from_bufnr(0) == params.textDocument.uri then
+			bufnr = vim.api.nvim_get_current_buf()
 		end
-		local row = params.position.line
-		local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1]
-		if not line then
-			return { isIncomplete = true, items = {} }
-		end
-		return require("skkelua.completion").get({ line = line, row = row, col = params.position.character })
 	end
-	return create_server(complete)
+	if not bufnr or not vim.api.nvim_buf_is_loaded(bufnr) then
+		return nil
+	end
+	local row = params.position.line
+	local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+	if line then
+		return { line = line, row = row, col = params.position.character }, bufnr
+	end
+end
+
+--- Create a transport for vim.lsp.start(). Never enables a completion UI.
+--- The caller validates the input document; nil means no applicable context.
+---@param get_context? fun(params: table): {line: string, row: integer, col: integer}?
+---@return fun(dispatchers: table): table
+function M.new_server(get_context)
+	return create_server(function(params)
+		local context = (get_context or M.get_context)(params)
+		return context and require("skkelua.completion").get(context) or { isIncomplete = true, items = {} }
+	end)
+end
+
+--- Attach a buffer to the shared external completion client, once per buffer.
+--- Keeps the client alive across SKK enable/disable and never enables a UI.
+---@param bufnr? integer Defaults to the current buffer.
+---@return integer? client_id
+function M.start(bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	if bufnr == 0 then
+		bufnr = vim.api.nvim_get_current_buf()
+	end
+	for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr, _uninitialized = true })) do
+		if client.config.skkelua_external_completion and not client:is_stopped() then
+			return client.id
+		end
+	end
+	return vim.lsp.start({
+		name = "skkelua",
+		cmd = M.new_server(),
+		skkelua_external_completion = true,
+	}, {
+		bufnr = bufnr,
+		reuse_client = function(client)
+			return client.config.skkelua_external_completion == true and not client:is_stopped()
+		end,
+	})
 end
 
 local function new_server()

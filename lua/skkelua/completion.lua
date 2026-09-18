@@ -238,6 +238,7 @@ function M.get(context)
 			local annotation = c.word:match(";(.*)$")
 			local item = {
 				label = display,
+				insertText = display,
 				labelDetails = annotation and { description = annotation } or nil,
 				detail = c.midasi,
 				kind = vim.lsp.protocol.CompletionItemKind.Text,
@@ -279,6 +280,7 @@ function M.get(context)
 	if registrable then
 		local item = {
 			label = "[辞書登録]",
+			insertText = pre_edit,
 			detail = midasi,
 			kind = vim.lsp.protocol.CompletionItemKind.Text,
 			sortText = ("%05d"):format(#items + 1),
