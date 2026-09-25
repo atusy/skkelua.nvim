@@ -79,6 +79,7 @@ end
 --- ユーザー辞書で確定済みの候補 (ランク持ち) を確定が新しい順に先頭へ置き、
 --- 残りは見出しの辞書順で並べる。
 --- abbrev モードでは入力の半角スペース前置形を末尾に足す
+--- (補完リストでは [辞書登録] の後ろに並ぶ)
 ---@return skkelua.LspCandidate[]
 local function okurinasi_candidates()
 	local skkelua = require("skkelua")
@@ -315,6 +316,9 @@ local function make_completion_list()
 	set_completeopt(buf, auto_select)
 
 	local items = {}
+	-- abbrev の raw 候補 (半角スペース + 入力) は辞書候補ではないので、
+	-- [辞書登録] より後ろに回す
+	local trailing = {}
 	local seen = {}
 	for _, c in ipairs(candidates) do
 		-- 送りありは語幹 + 送り仮名の完成形を挿入する
@@ -327,10 +331,6 @@ local function make_completion_list()
 				labelDetails = annotation and { description = annotation } or nil,
 				detail = c.midasi,
 				kind = vim.lsp.protocol.CompletionItemKind.Text,
-				-- クライアント (builtin) は sortText (無ければ label) で並べ替える。
-				-- 辞書順 (ユーザー辞書 -> グローバル辞書のマージ順) を保つよう
-				-- 応答順の連番を振る
-				sortText = ("%05d"):format(#items + 1),
 				textEdit = {
 					range = range,
 					newText = display,
@@ -362,11 +362,15 @@ local function make_completion_list()
 				item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet
 				item.textEdit.newText = escape_snippet(display)
 			end
-			items[#items + 1] = item
+			if c.raw then
+				trailing[#trailing + 1] = item
+			else
+				items[#items + 1] = item
+			end
 		end
 	end
 
-	-- 新しい読みを登録する項目を末尾に置く (候補が無い読みでも pum が開く)。
+	-- 新しい読みを登録する項目を辞書候補の後ろに置く (候補が無い読みでも pum が開く)。
 	-- 挿入テキストは pre-edit 自身にして、フォーカスや確定でバッファが
 	-- 変わらないようにする。確定すると CompleteDone から登録プロンプトが開く
 	-- (登録プロンプトの中ではネストしたプロンプトが積まれる)。
@@ -387,7 +391,6 @@ local function make_completion_list()
 			label = "[辞書登録]",
 			detail = midasi,
 			kind = vim.lsp.protocol.CompletionItemKind.Text,
-			sortText = ("%05d"):format(#items + 1),
 			textEdit = {
 				range = range,
 				newText = pre_edit,
@@ -406,6 +409,14 @@ local function make_completion_list()
 			item.textEdit.newText = escape_snippet(pre_edit)
 		end
 		items[#items + 1] = item
+	end
+	vim.list_extend(items, trailing)
+
+	-- クライアント (builtin) は sortText (無ければ label) で並べ替える。
+	-- 辞書順 (ユーザー辞書 -> グローバル辞書のマージ順) と上の配置を保つよう
+	-- 応答順の連番を振る
+	for i, item in ipairs(items) do
+		item.sortText = ("%05d"):format(i)
 	end
 
 	return { isIncomplete = true, items = items }

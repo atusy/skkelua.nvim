@@ -80,7 +80,7 @@ function M.henkan_first(context, key)
 end
 
 --- 変換候補を経由せず辞書登録プロンプトを開く
---- (補完メニュー末尾の [辞書登録] 項目から呼ばれる)
+--- (補完メニューの [辞書登録] 項目から呼ばれる)
 ---@param context skkelua.Context
 function M.register_word_first(context)
 	local from_input = context.state.type == "input"
