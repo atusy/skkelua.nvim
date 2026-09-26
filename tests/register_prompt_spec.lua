@@ -1,13 +1,32 @@
 -- 辞書登録プロンプト (フロート版) のテスト
 --
--- Note: 確定・キャンセルのフルフロー (insert モード遷移 + feedkeys) は
---       headless では検証できないため E2E に任せ、ここでは
---       フロートの開閉と経路の分岐を確認する。確定は <CR> の代わりに
---       テスト用 API の _confirm で駆動する
+-- Note: 実バッファを使う復元フローは feedkeys で駆動し、確定だけは
+--       headless では <CR> の代わりにテスト用 API の _confirm で駆動する。
 
 local t = require("tests.helper")
 
 local vim_status = { mode = "", prevInput = "", completeInfo = {}, completeType = "" }
+
+local function feed(keys)
+	vim.fn.feedkeys(vim.api.nvim_replace_termcodes(keys, true, true, true), "tx")
+end
+
+--- 辞書登録の復元処理は pre-edit が実バッファ上にあることを前提にするため、
+--- 低レベルの handle API ではなく実際の insert バッファを用意する。
+local function prepare_buffer()
+	vim.cmd.enew({ bang = true })
+	vim.cmd("inoremap <buffer> J <Cmd>lua require('skkelua').handle('enable', {})<CR>")
+	return vim.api.nvim_get_current_buf()
+end
+
+local function cleanup_buffer(buf, prompt)
+	prompt._close()
+	vim.wait(100)
+	vim.cmd("stopinsert")
+	if buf and vim.api.nvim_buf_is_valid(buf) then
+		pcall(vim.api.nvim_buf_delete, buf, { force = true })
+	end
+end
 
 t.test("register prompt opens a float prompt buffer with skkelua enabled", function()
 	local prompt = require("skkelua.register_prompt")
@@ -65,22 +84,10 @@ t.test("external close restores henkan input state", function()
 	local skkelua = require("skkelua")
 	local prompt = require("skkelua.register_prompt")
 	local store = require("skkelua.store")
-	skkelua._handle_request("enable", {}, vim_status)
+	local scratch = prepare_buffer()
 
 	local ok, err = pcall(function()
-		for _, k in ipairs({ "N", "u", "n", "u" }) do
-			skkelua._handle_request("handleKey", { key = { k } }, {
-				mode = "",
-				prevInput = store.get_context():to_string(),
-				completeInfo = {},
-				completeType = "",
-			})
-		end
-		skkelua._handle_request(
-			"handleKey",
-			{ ["function"] = "henkanFirst", key = { "" } },
-			{ mode = "", prevInput = "▽ぬぬ", completeInfo = {}, completeType = "" }
-		)
+		feed("iJNunu ")
 		vim.wait(200, function()
 			return prompt._current() ~= nil
 		end, 10)
@@ -103,8 +110,9 @@ t.test("external close restores henkan input state", function()
 		-- 補完 (make_completion_list) が参照する公開ステータスも復元されている
 		t.assert_equals("input:okurinasi", skkelua.phase())
 		t.assert_equals("ぬぬ", store.status.henkanFeed)
+		t.assert_equals({ "▽ぬぬ" }, vim.api.nvim_buf_get_lines(scratch, 0, -1, false))
 	end)
-	prompt._close()
+	cleanup_buffer(scratch, prompt)
 	skkelua._handle_request("disable", {}, vim_status)
 	if not ok then
 		error(err, 0)
@@ -297,23 +305,11 @@ t.test("register_word nests inside the prompt", function()
 	local skkelua = require("skkelua")
 	local prompt = require("skkelua.register_prompt")
 	local store = require("skkelua.store")
-	skkelua._handle_request("enable", {}, vim_status)
+	local scratch = prepare_buffer()
 
 	local ok, err = pcall(function()
 		-- 辞書に無い読み (▽ぬぬ) で外側のプロンプトを開く
-		for _, k in ipairs({ "N", "u", "n", "u" }) do
-			skkelua._handle_request("handleKey", { key = { k } }, {
-				mode = "",
-				prevInput = store.get_context():to_string(),
-				completeInfo = {},
-				completeType = "",
-			})
-		end
-		skkelua._handle_request(
-			"handleKey",
-			{ ["function"] = "henkanFirst", key = { "" } },
-			{ mode = "", prevInput = "▽ぬぬ", completeInfo = {}, completeType = "" }
-		)
+		feed("iJNunu ")
 		vim.wait(200, function()
 			return prompt._current() ~= nil
 		end, 10)
@@ -321,19 +317,7 @@ t.test("register_word nests inside the prompt", function()
 		t.assert_true(outer ~= nil, "outer prompt should open")
 
 		-- プロンプト内でさらに辞書に無い読み (▽ねね) を変換するとネストする
-		for _, k in ipairs({ "N", "e", "n", "e" }) do
-			skkelua._handle_request("handleKey", { key = { k } }, {
-				mode = "i",
-				prevInput = store.get_context():to_string(),
-				completeInfo = {},
-				completeType = "",
-			})
-		end
-		skkelua._handle_request(
-			"handleKey",
-			{ ["function"] = "henkanFirst", key = { "" } },
-			{ mode = "i", prevInput = "▽ねね", completeInfo = {}, completeType = "" }
-		)
+		feed(vim.fn.mode() == "i" and "Nene " or "aNene ")
 		vim.wait(200, function()
 			local cur = prompt._current()
 			return cur ~= nil and cur.win ~= outer.win
@@ -355,8 +339,9 @@ t.test("register_word nests inside the prompt", function()
 		t.assert_equals("input", context.state.type)
 		t.assert_equals("ねね", context.state.henkanFeed)
 		t.assert_equals("▽ねね", context:to_string())
+		t.assert_equals({ "> ▽ねね" }, vim.api.nvim_buf_get_lines(outer.buf, 0, -1, false))
 	end)
-	prompt._close()
+	cleanup_buffer(scratch, prompt)
 	skkelua._handle_request("disable", {}, vim_status)
 	if not ok then
 		error(err, 0)
@@ -367,41 +352,17 @@ t.test("confirming the nested prompt registers to the dictionary", function()
 	local skkelua = require("skkelua")
 	local prompt = require("skkelua.register_prompt")
 	local store = require("skkelua.store")
-	skkelua._handle_request("enable", {}, vim_status)
+	local scratch = prepare_buffer()
 
 	local ok, err = pcall(function()
-		for _, k in ipairs({ "N", "u", "n", "u" }) do
-			skkelua._handle_request("handleKey", { key = { k } }, {
-				mode = "",
-				prevInput = store.get_context():to_string(),
-				completeInfo = {},
-				completeType = "",
-			})
-		end
-		skkelua._handle_request(
-			"handleKey",
-			{ ["function"] = "henkanFirst", key = { "" } },
-			{ mode = "", prevInput = "▽ぬぬ", completeInfo = {}, completeType = "" }
-		)
+		feed("iJNunu ")
 		vim.wait(200, function()
 			return prompt._current() ~= nil
 		end, 10)
 		local outer = prompt._current()
 		t.assert_true(outer ~= nil, "outer prompt should open")
 
-		for _, k in ipairs({ "N", "e", "n", "e" }) do
-			skkelua._handle_request("handleKey", { key = { k } }, {
-				mode = "i",
-				prevInput = store.get_context():to_string(),
-				completeInfo = {},
-				completeType = "",
-			})
-		end
-		skkelua._handle_request(
-			"handleKey",
-			{ ["function"] = "henkanFirst", key = { "" } },
-			{ mode = "i", prevInput = "▽ねね", completeInfo = {}, completeType = "" }
-		)
+		feed(vim.fn.mode() == "i" and "Nene " or "aNene ")
 		vim.wait(200, function()
 			local cur = prompt._current()
 			return cur ~= nil and cur.win ~= outer.win
@@ -409,7 +370,7 @@ t.test("confirming the nested prompt registers to the dictionary", function()
 		t.assert_true(prompt._current().win ~= outer.win, "nested prompt should open")
 
 		-- ネスト側を確定すると辞書登録され、外側プロンプトへ復帰する
-		-- (バッファへの候補挿入は feedkeys 経由のため headless では見ない)
+		-- バッファ上の pre-edit も登録候補へ置換される
 		prompt._confirm("根")
 		vim.wait(200, function()
 			return #store.get_library():get_henkan_result("okurinasi", "ねね") > 0
@@ -418,8 +379,9 @@ t.test("confirming the nested prompt registers to the dictionary", function()
 		t.assert_equals(1, #prompt._stack())
 		t.assert_equals(outer.win, prompt._current().win)
 		t.assert_equals(outer.win, vim.api.nvim_get_current_win())
+		t.assert_equals({ "> 根" }, vim.api.nvim_buf_get_lines(outer.buf, 0, -1, false))
 	end)
-	prompt._close()
+	cleanup_buffer(scratch, prompt)
 	skkelua._handle_request("disable", {}, vim_status)
 	if not ok then
 		error(err, 0)
