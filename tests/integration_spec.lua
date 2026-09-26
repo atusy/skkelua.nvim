@@ -410,6 +410,9 @@ t.test("nested registration via the float prompt", function()
 	end)
 	-- プロンプトが残ると後続テストを汚すため必ず閉じる
 	prompt._close()
+	-- close() はウィンドウとバッファの破棄を schedule しているため、
+	-- scratch を削除する前に復帰先のウィンドウが戻るのを待つ。
+	vim.wait(100)
 	vim.cmd("stopinsert")
 	pcall(vim.api.nvim_buf_delete, scratch, { force = true })
 	if not ok then
