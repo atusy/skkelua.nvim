@@ -161,10 +161,28 @@ function M.open(opts)
 	require("skkelua").handle("enable", {})
 
 	-- <Esc> はプロンプトのキャンセル (skkelua の escape 機能より優先
-	-- させるため、skkelua のマップの後に buffer-local で上書きする)
-	vim.keymap.set({ "i", "n" }, "<Esc>", function()
-		finish(entry, opts.on_cancel)
-	end, { buffer = buf, nowait = true })
+	-- させるため、skkelua のマップの後に buffer-local で上書きする)。
+	-- skkelua は insert のキーを :lmap で張り、:lmap は :imap より先に
+	-- 適用されるため、同じ :lmap でも上書きする。プロンプト内で skkelua を
+	-- 無効化・有効化し直すと :lmap が張り直されるので、enable-post のたびに
+	-- 上書きし直す
+	local function override_esc()
+		vim.keymap.set({ "i", "l", "n" }, "<Esc>", function()
+			finish(entry, opts.on_cancel)
+		end, { buffer = buf, nowait = true })
+	end
+	override_esc()
+	vim.api.nvim_create_autocmd("User", {
+		pattern = "skkelua-enable-post",
+		callback = function()
+			if not vim.api.nvim_buf_is_valid(buf) then
+				return true -- プロンプトが消えたら autocmd も消す
+			end
+			if vim.api.nvim_get_current_buf() == buf then
+				override_esc()
+			end
+		end,
+	})
 
 	vim.cmd("startinsert!")
 end

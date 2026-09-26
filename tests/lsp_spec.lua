@@ -82,7 +82,7 @@ t.test("completion list for henkan input", function()
 	t.assert_equals({ line = 0, character = 0 }, kanji.textEdit.range.start)
 	t.assert_equals({ line = 0, character = 12 }, kanji.textEdit.range["end"])
 	t.assert_equals(
-		{ skkelua = true, midasi = "かんじ", word = "漢字", type = "okurinasi", okuri = "" },
+		{ skkelua = true, midasi = "かんじ", word = "漢字", type = "okurinasi", okuri = "", text = "漢字" },
 		kanji.data
 	)
 
@@ -270,7 +270,7 @@ t.test("completion during okuriari input", function()
 	t.assert_equals("送り", okuri.textEdit.newText)
 	t.assert_equals("おくr", okuri.detail)
 	t.assert_equals(
-		{ skkelua = true, midasi = "おくr", word = "送", type = "okuriari", okuri = "り" },
+		{ skkelua = true, midasi = "おくr", word = "送", type = "okuriari", okuri = "り", text = "送り" },
 		okuri.data
 	)
 	vim.cmd.bwipeout({ bang = true })
@@ -329,7 +329,7 @@ t.test("completion during henkan phase (candidate selection)", function()
 	t.assert_equals(pre_edit, okuru.filterText)
 	t.assert_equals("贈る", okuru.textEdit.newText)
 	t.assert_equals(
-		{ skkelua = true, midasi = "おくr", word = "贈", type = "okuriari", okuri = "る" },
+		{ skkelua = true, midasi = "おくr", word = "贈", type = "okuriari", okuri = "る", text = "贈る" },
 		okuru.data
 	)
 	vim.cmd.bwipeout({ bang = true })

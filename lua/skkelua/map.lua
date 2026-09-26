@@ -26,16 +26,22 @@ function M.save(mode)
 end
 
 --- 保存したマッピングを復元する
-function M.restore()
-	local bufnr = vim.api.nvim_get_current_buf()
+---@param bufnr? integer 省略時は現在のバッファ
+function M.restore(bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	local buf = vault[bufnr] or {}
-	for mode, maps in pairs(buf) do
-		vim.cmd(mode .. "mapclear <buffer>")
-		for _, m in ipairs(maps) do
-			pcall(vim.fn.mapset, mode, false, m)
-		end
-	end
 	vault[bufnr] = nil
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+	vim.api.nvim_buf_call(bufnr, function()
+		for mode, maps in pairs(buf) do
+			vim.cmd(mode .. "mapclear <buffer>")
+			for _, m in ipairs(maps) do
+				pcall(vim.fn.mapset, mode, false, m)
+			end
+		end
+	end)
 end
 
 return M

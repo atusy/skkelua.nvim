@@ -5,6 +5,13 @@ local M = {}
 
 local initialized = false
 
+-- insert モードの <expr> マッピング (map() 参照) の評価中かどうか
+-- (disable_impl がマッピングの削除を遅らせる判定に使う)
+local expr_depth = 0
+-- <expr> の評価中に無効化され、マッピングの削除を保留しているバッファ
+---@type integer?
+local pending_map_restore = nil
+
 local function termcode(s)
 	return vim.api.nvim_replace_termcodes(s, true, true, true)
 end
@@ -166,6 +173,69 @@ local function handle_complete_key(completed, complete_type, notation_str)
 	return nil
 end
 
+-- 直近のキー処理でバッファに描いた pre-edit (handle_request が補完による
+-- バッファの書き換えで状態をリセットする前の表示)。finalize_completion が
+-- 消すべき文字数を知るのに使う
+local last_drawn = ""
+
+-- 補完メニューの選択中に押されても候補を確定しない (選択挿入中の word を
+-- 対象に独自の処理をする) 機能。common.lua の lsp.selected_word() 利用箇所
+local SELECTION_AWARE_FUNCTIONS = {
+	deletePreEdit = true,
+	passThrough = true,
+	purgeCandidate = true,
+	prefix = true,
+}
+
+--- 補完メニューで選択中の skkelua の候補を、このキーで確定するかどうか。
+--- 確定キー (<C-y> / <CR>) は常に確定する。insertOnSelect では選択と同時に
+--- 候補がバッファへ入っており、続けて打つキーは (選択挿入中の word を
+--- 扱う機能を除き) その候補を確定した上での入力になる。
+--- insertOnSelect でない場合、選択は表示上のフォーカスだけなので、
+--- 確定キー以外では確定しない (Space は skkelua 自身の候補送りになる)
+---@param notation_str string
+---@param state_type string
+---@return boolean
+local function should_finalize_completion(notation_str, state_type)
+	if notation_str == "<c-y>" or notation_str == "<cr>" then
+		return true
+	end
+	if not require("skkelua.config").config.completion.insertOnSelect then
+		return false
+	end
+	local name = require("skkelua.keymap").function_name(state_type, notation_str)
+	return not SELECTION_AWARE_FUNCTIONS[name]
+end
+
+--- 補完メニューで選択中の skkelua の候補を、native の確定 (<C-y>) でなく
+--- skkelua 自身の出力で確定するためのキー列を返す。
+---
+--- 補完 UI による候補の挿入 (insertOnSelect の選択挿入や、確定時の textEdit
+--- の適用) はバッファの直接書き換えでキー列にならず、マクロに残らない。
+--- そこで pum を <C-e> で閉じて選択挿入前の pre-edit 表示に戻し、pre-edit を
+--- 消して候補を入れるキー列を出力する。マクロには「pre-edit の削除 + 候補」
+--- だけが記録され、再生時は補完に頼らず同じ文字列が入る (<C-e> は <Cmd> の
+--- 中で pum が見えている時だけ送るので、再生時には何もしない)。
+--- 確定した候補の辞書登録は native の確定 (CompleteDone) を通らないため
+--- ここで行う
+---@param context skkelua.Context
+---@param data table 候補の data (lsp.lua)
+---@param word string pum の item.word (data.text が無い場合の挿入文字列)
+---@return string
+local function finalize_completion(context, data, word)
+	if not data.raw then
+		M.complete_callback(data.midasi, data.word, data.type)
+	end
+	local bs = last_drawn == "" and 0 or vim.fn.strcharlen(last_drawn)
+	require("skkelua.mode").initialize_state_with_abbrev(context, { "converter" })
+	context.preEdit:sync("")
+	return termcode("<Cmd>")
+		.. "lua local ok, m = pcall(require, 'skkelua') if ok then m._revert_completion() end"
+		.. termcode("<CR>")
+		.. ("\b"):rep(bs)
+		.. (data.text or word or "")
+end
+
 ---@param opts table
 ---@param vim_status skkelua.VimStatus
 ---@return string
@@ -184,35 +254,49 @@ local function handle_impl(opts, vim_status)
 	end
 	local context = store.get_context()
 	context.vimMode = vim_status.mode
+	-- 補完メニューで選択中の候補を確定するキー列 (出力の先頭に付ける)
+	local prefix = ""
 	if is_truthy(vim_status.completeInfo.pum_visible) then
 		if config.debug then
 			vim.print("input after complete")
 		end
 		local notation_str = table.concat(key_list)
+		local info = vim_status.completeInfo
+		local completed = (info.selected or -1) >= 0
 		if config.debug then
 			vim.print({
 				completeType = vim_status.completeType,
-				selected = vim_status.completeInfo.selected,
+				selected = info.selected,
 			})
 		end
-		local handled = handle_complete_key(
-			vim_status.completeInfo.selected >= 0,
-			vim_status.completeType,
-			notation_str
-		)
-		if type(handled) == "string" then
-			-- [辞書登録] 項目の確定はバッファを変えず、CompleteDone からの
-			-- registerWord が変換入力の続きとして実行されるため状態を保つ
-			local info = vim_status.completeInfo
-			local sel_item
-			if (info.selected or -1) >= 0 and type(info.items) == "table" then
-				sel_item = info.items[info.selected + 1]
+		local sel_item
+		if completed and type(info.items) == "table" then
+			sel_item = info.items[info.selected + 1]
+		end
+		local lsp = require("skkelua.lsp")
+		local data = lsp.item_data(sel_item)
+		if
+			vim_status.completeType == "native"
+			and data
+			and not data.register
+			and should_finalize_completion(notation_str, context.state.type)
+		then
+			-- 選択中の skkelua の候補は native の確定に任せず、自前の出力で確定する
+			prefix = finalize_completion(context, data, sel_item.word)
+			if notation_str == "<c-y>" or (notation_str == "<cr>" and config.eggLikeNewline) then
+				return prefix
 			end
-			if not require("skkelua.lsp").is_register_item(sel_item) then
-				require("skkelua.mode").initialize_state_with_abbrev(context, { "converter" })
-				context.preEdit:output("")
+		else
+			local handled = handle_complete_key(completed, vim_status.completeType, notation_str)
+			if type(handled) == "string" then
+				-- [辞書登録] 項目の確定はバッファを変えず、CompleteDone からの
+				-- registerWord が変換入力の続きとして実行されるため状態を保つ
+				if not lsp.is_register_item(sel_item) then
+					require("skkelua.mode").initialize_state_with_abbrev(context, { "converter" })
+					context.preEdit:output("")
+				end
+				return handled
 			end
-			return handled
 		end
 	end
 	local before = context.mode
@@ -232,9 +316,9 @@ local function handle_impl(opts, vim_status)
 	local output = context.preEdit:output(context:to_string())
 	if output == "" and before ~= context.mode then
 		-- モード変更をステータスライン等に反映させるための no-op 出力
-		return " \b"
+		return prefix .. " \b"
 	end
-	return output
+	return prefix .. output
 end
 
 ---@param opts table
@@ -325,6 +409,7 @@ local function handle_request(func, opts, vim_status)
 	local store = require("skkelua.store")
 	local util = require("skkelua.util")
 	local context = store.get_context()
+	last_drawn = context.preEdit:shown()
 	-- 補完の後など preEdit とバッファが不一致している状態の時にリセットする
 	if vim_status.mode ~= "t" and not util.ends_with(vim_status.prevInput, context:to_string()) then
 		require("skkelua.mode").initialize_state_with_abbrev(context, { "converter" })
@@ -381,11 +466,21 @@ function M.handle(func, opts)
 	end
 
 	if result ~= "" then
+		-- 't' 付きの feedkeys はマクロ録画中にその出力もレジスタへ記録する。
+		-- insert モードでここへ来るのは <Plug>(skkelua-*) 経由の確定文字列で、
+		-- :lmap の <expr> 出力 (map() 参照) と同じく「結果」として記録したいので
+		-- 't' を残す。cmdline / terminal モードは通常のマッピングで打鍵側が
+		-- 記録済みなので 't' を外し、出力の二重記録を防ぐ (再生時は打鍵が
+		-- 改めてマッピングで処理される)
+		local flags = "nit"
+		if vim.fn.reg_recording() ~= "" and vim.fn.mode() ~= "i" then
+			flags = "ni"
+		end
 		if is_cmd then
-			vim.api.nvim_feedkeys(termcode("<Cmd>") .. result:sub(6) .. termcode("<CR>"), "nit", false)
+			vim.api.nvim_feedkeys(termcode("<Cmd>") .. result:sub(6) .. termcode("<CR>"), flags, false)
 		else
 			-- escape_ks=true: UTF-8 文字列に含まれる K_SPECIAL(0x80) をエスケープする
-			vim.api.nvim_feedkeys(result, "nit", true)
+			vim.api.nvim_feedkeys(result, flags, true)
 		end
 	end
 end
@@ -474,14 +569,28 @@ function M.get_default_mapped_keys()
 end
 
 --- 現在のバッファに skkelua のキーマッピングを張る
+---
+--- insert モードのキーは :lmap (+ 'iminsert' = 1、option.lua 参照) で張る。
+--- マクロの録画 (q) は通常のマッピングだと打鍵した lhs を記録するが、
+--- :lmap は IME 相当の翻訳層として扱われ、マッピングの結果の方が記録される
+--- (neovim/neovim#5658)。<expr> で変換結果 (かな・漢字と削除用の BS) を
+--- 返すことで、レジスタには変換後の文字列だけが残り、再生時には skkelua の
+--- 有効・無効や辞書の状態に関係なく同じ文字列が入る (再生されるキーは打鍵
+--- ではないので :lmap は再適用されない)。:imap + feedkeys 方式だと打鍵と
+--- 出力の両方が記録され、再生すると二重に処理されて壊れる。
+--- :lmap は打鍵にしか適用されないため、他のマッピングやマクロ再生から来た
+--- キーは変換されずそのまま入る (IME と同じ扱い)。
+--- Note: <expr> の評価中はテキストや window を変更できない (E565) ため、
+---       候補ポップアップや登録プロンプトの表示は schedule して行っている
 function M.map()
 	local notation = require("skkelua.notation")
 	local mode = vim.fn.mode()
 	if mode == "n" then
 		mode = "i"
 	end
+	local map_mode = mode == "i" and "l" or mode
 
-	require("skkelua.map").save(mode)
+	require("skkelua.map").save(map_mode)
 
 	local mapped_keys = require("skkelua.config").config.mappedKeys or M.get_default_mapped_keys()
 	for _, c in ipairs(mapped_keys) do
@@ -492,18 +601,63 @@ function M.map()
 		--       shift 入力扱いの上 "<bar>" がそのまま挿入されてしまう
 		local k = notation.normalize(c)
 		local func = "handleKey"
+		-- ユーザーの (insert / cmdline / terminal の) マッピングから
+		-- <Plug>(skkelua-enable) などを拾い、同じ機能に振り向ける
 		local plug = vim.fn.maparg(c, mode):match("<Plug>%(skkelua%-(%a+)%)")
 		if plug then
 			func = plug
 		end
-		vim.keymap.set(mode, c, function()
-			require("skkelua").handle(func, { key = k })
-		end, {
+		local opts = {
 			buffer = true,
 			nowait = true,
 			silent = true,
 			desc = ("skkelua %s (%s)"):format(func, k),
-		})
+		}
+		if mode == "i" then
+			opts.expr = true
+			-- handle の返す出力は termcode 済みの生のキー列 (かな本文や <Cmd>)
+			-- なので、<> 表記としての再変換はしない
+			opts.replace_keycodes = false
+			local raw = notation.notation_to_key[k] or k
+			-- 有効・無効の切り替えはユーザーの <Plug> マッピングと同じ <Cmd> の
+			-- 実行にする。マクロにはこの <Cmd> と、handle が feedkeys する確定
+			-- 文字列が記録されるため、再生時にも skkelua の状態が同じように
+			-- 切り替わる
+			local cmd = termcode("<Cmd>")
+				.. ("lua require('skkelua').handle(%q, { key = %q })"):format(func, k)
+				.. termcode("<CR>")
+			vim.keymap.set("l", c, function()
+				-- 'iminsert' = 1 の間は <C-o> (niI) や r/f の引数にも :lmap が
+				-- 効くため、insert 以外ではキーをそのまま通す
+				if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then
+					return raw
+				end
+				if func ~= "handleKey" then
+					return cmd
+				end
+				expr_depth = expr_depth + 1
+				local ok, result = pcall(require("skkelua").handle, func, { key = k, expr = true })
+				expr_depth = expr_depth - 1
+				if not ok then
+					error(result, 0)
+				end
+				if pending_map_restore then
+					-- 評価中に無効化された (<Esc>)。マッピングの削除を結果の先頭で
+					-- 実行し、続く <Esc> や次のキーより先に片付ける。
+					-- この <Cmd> はマクロにも記録されるため、skkelua が無い環境で
+					-- 再生されても壊れないよう pcall で包む
+					result = termcode("<Cmd>")
+						.. "lua local ok, m = pcall(require, 'skkelua') if ok then m._restore_pending_maps() end"
+						.. termcode("<CR>")
+						.. result
+				end
+				return result
+			end, opts)
+		else
+			vim.keymap.set(mode, c, function()
+				require("skkelua").handle(func, { key = k })
+			end, opts)
+		end
 	end
 end
 
@@ -536,13 +690,42 @@ function M.disable_impl()
 	local status = require("skkelua.store").status
 	if status.enabled then
 		emit_user_autocmd("skkelua-disable-pre")
-		require("skkelua.map").restore()
+		if expr_depth > 0 then
+			-- <expr> マッピングの評価中 (<Esc> による無効化) に、評価中の
+			-- マッピング自身を消すと Neovim は解放済みのマッピングを参照して
+			-- しまい、結果がマクロに記録されないなどの不具合が出る。
+			-- 削除はマッピングの結果として送る <Cmd> (map() 参照) に任せ、
+			-- 評価が終わった直後、次のキーが処理される前に行う
+			pending_map_restore = vim.api.nvim_get_current_buf()
+		else
+			require("skkelua.map").restore()
+		end
 		require("skkelua.option").restore()
 		status.mode = ""
 		emit_user_autocmd("skkelua-mode-changed")
 		emit_user_autocmd("skkelua-disable-post")
 		status.enabled = false
 		require("skkelua.guard").detach()
+	end
+end
+
+--- <expr> の評価中に保留したマッピングの削除を行う
+--- (map() が結果の先頭に付ける <Cmd> から呼ばれる。マクロに記録された
+---  <Cmd> の再生など、保留が無ければ何もしない)
+function M._restore_pending_maps()
+	local bufnr = pending_map_restore
+	pending_map_restore = nil
+	if bufnr then
+		require("skkelua.map").restore(bufnr)
+	end
+end
+
+--- 補完メニューが開いていれば <C-e> で閉じ、選択挿入前の pre-edit 表示に戻す
+--- (finalize_completion が出力の先頭に付ける <Cmd> から呼ばれる。
+---  マクロの再生など、メニューが無ければ何もしない)
+function M._revert_completion()
+	if vim.fn.pumvisible() == 1 then
+		vim.api.nvim_feedkeys(termcode("<C-e>"), "ni", false)
 	end
 end
 

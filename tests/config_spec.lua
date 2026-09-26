@@ -17,7 +17,7 @@ t.test("egg like newline", function()
 	local context = require("skkelua.context").new()
 	-- normal
 	t.dispatch(context, "A \nA\n")
-	t.assert_equals("あ\nあ\n", context.preEdit:output(""))
+	t.assert_equals("あ\rあ\r", context.preEdit:output(""))
 	-- egg like
 	config.eggLikeNewline = true
 	t.dispatch(context, "A \nA\n")

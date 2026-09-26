@@ -13,6 +13,7 @@ INTERFACE                                                  |skkelua-interface|
   AUTOCMDS                                                  |skkelua-autocmds|
 OPTIONS                                                      |skkelua-options|
 COMPLETION                                                |skkelua-completion|
+MACRO                                                          |skkelua-macro|
 INDICATOR                                                  |skkelua-indicator|
 SOURCES                                                      |skkelua-sources|
 KANATABLE                                                  |skkelua-kanatable|
@@ -347,6 +348,36 @@ Note: |vim.lsp.completion.enable()| は最初にバッファの補完状態を�
 autotrigger が失われて候補が自動表示されなくなります。
 
 ==============================================================================
+MACRO                                                          *skkelua-macro*
+
+insert モードでの skkelua のキーは |:lmap| (言語マッピング) で張られ、有効な
+間は 'iminsert' が 1 になります。Neovim は |:lmap| を IME 相当の翻訳層と
+みなし、マクロ (|q|) の録画では打鍵ではなくマッピングの結果を記録します。
+そのため skkelua で入力した日本語は変換後の文字列としてレジスタに残り、|@|
+で再生すると skkelua の有効・無効や辞書の状態に関係なく同じ文字列が挿入され
+ます (再生中のキーは打鍵ではないので skkelua のマッピングは適用されません)。
+
+- 有効・無効の切り替え (<Plug>(skkelua-*) を割り当てたキー) は、skkelua が
+  有効な間に押されたものも <Cmd> として記録され、再生時にも同じように
+  切り替わります。<Esc> などによる無効化の直前には、skkelua のマッピングを
+  消すための内部用の <Cmd> が記録されます (再生時は何もしません)。
+- cmdline / terminal モードでは通常のマッピングのため打鍵の方が記録され、
+  再生時に改めて変換されます。
+- 補完メニュー (|skkelua-completion|) で選んだ候補の確定 (<C-y> / <CR>、
+  insertOnSelect では続けて打つキーも) は、skkelua 自身の出力 (pre-edit の
+  削除 + 候補の挿入) として記録されます。メニューを開く・選ぶ操作 (CTRL-N
+  など) も打鍵として記録されますが、再生時にメニューが開くかどうかに
+  関係なく同じ文字列が入ります。ただし [辞書登録] 項目の確定 (登録
+  プロンプト) は再生できません。
+
+|:lmap| は打鍵にしか適用されないため、他のマッピングや |feedkeys()| から
+来たキーも変換されずそのまま入ります。
+
+Note: 'iminsert' が 1 の間は 'showmode' のモード表示や 'statusline' の %k に
+"(lang)" が表示されます。表示名は |b:keymap_name| で変更できます。
+skkelua が有効な間の |i_CTRL-^| は 'iminsert' を切り替えないよう破棄します。
+
+==============================================================================
 INDICATOR                                                  *skkelua-indicator*
 
 カーソル付近に現在の入力モードをフローティングウィンドウで表示します。
@@ -479,5 +510,7 @@ skkeleton (denops 版) との違い:
   します。
 - setUndoPoint のデフォルトは false です (skkeleton は true)。変換ごとに
   undo を区切りたい場合は明示的に有効にしてください。
+- insert モードのキーは :imap でなく :lmap で張ります。マクロには打鍵で
+  なく変換結果が記録されます (|skkelua-macro|)。
 
 vim:tw=78:ts=8:noet:ft=help:norl:

@@ -116,6 +116,18 @@ function M.register_key_map(state, key, func)
 	key_map.map[key] = name
 end
 
+--- キーに割り当てられている機能名 (未割り当てならデフォルト) を返す
+---@param state string "input" | "henkan"
+---@param key string notation 形式のキー
+---@return string|skkelua.Func|nil
+function M.function_name(state, key)
+	local key_map = key_maps[state]
+	if not key_map then
+		return nil
+	end
+	return key_map.map[key] or key_map.default
+end
+
 --- テスト用: 登録されている機能名を返す
 ---@param state string
 ---@param key string

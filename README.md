@@ -57,6 +57,10 @@ require("skkelua").config({
 ユーザー辞書はデフォルトで `stdpath("data")/skkelua/jisyo`
 (通常 `~/.local/share/nvim/skkelua/jisyo`) に保存されます。
 
+insert モードのキーは `:lmap` で張られるため、マクロ (`q`) には打鍵ではなく
+変換結果の文字列が記録されます。再生時は skkelua の有効・無効や辞書の状態に
+関係なく同じ文字列が入ります (詳細は `:h skkelua-macro`)。
+
 insert に入るたび自動で skkelua を有効化する persistent mode も使えます。
 日本語を書き続ける間だけオンにしておく使い方です。
 

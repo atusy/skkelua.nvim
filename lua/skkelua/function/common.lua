@@ -69,7 +69,10 @@ function M.newline(context)
 	)
 	M.kakutei(context)
 	if insert_newline then
-		context:kakutei("\n")
+		-- <CR> 相当の \r を出す。<NL> (\n = <C-j>) だと、マクロに記録された
+		-- 出力を再生する際 (init.lua の map() 参照) にユーザーの <C-j>
+		-- マッピング (トグルの定番) へ捕まって改行にならない
+		context:kakutei("\r")
 	end
 end
 

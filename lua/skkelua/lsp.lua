@@ -221,12 +221,23 @@ local function selected_word(before_cursor)
 	return word, item.data
 end
 
+--- complete_info() の item が skkelua の候補なら、その data を返す
+---@param pum_item? table
+---@return table?
+function M.item_data(pum_item)
+	local data = vim.tbl_get(pum_item or {}, "user_data", "nvim", "lsp", "completion_item", "data")
+	if type(data) == "table" and data.skkelua == true then
+		return data
+	end
+	return nil
+end
+
 --- complete_info() の item が skkelua の [辞書登録] 項目かどうか
 ---@param pum_item? table
 ---@return boolean
 function M.is_register_item(pum_item)
-	local data = vim.tbl_get(pum_item or {}, "user_data", "nvim", "lsp", "completion_item", "data")
-	return type(data) == "table" and data.skkelua == true and data.register == true
+	local data = M.item_data(pum_item)
+	return data ~= nil and data.register == true
 end
 
 --- pum で選択中の自前候補の word が現在のカーソル前に挿入されていれば返す
@@ -337,8 +348,17 @@ local function make_completion_list()
 				},
 				-- okuri (送り仮名の生かな) は purgeCandidate が ▽henkanFeed*okuriFeed
 				-- を組み立て直すのに使う (midasi は語幹 + 送り仮名アルファベットの
-				-- 辞書見出し形式で、そのままでは送り仮名を分離できない)
-				data = { skkelua = true, midasi = c.midasi, word = c.word, type = c.type, okuri = c.okuri, raw = c.raw },
+				-- 辞書見出し形式で、そのままでは送り仮名を分離できない)。
+				-- text は確定時にバッファへ入れる文字列 (init.lua の finalize_completion)
+				data = {
+					skkelua = true,
+					midasi = c.midasi,
+					word = c.word,
+					type = c.type,
+					okuri = c.okuri,
+					raw = c.raw,
+					text = display,
+				},
 			}
 			if instant_insert then
 				-- insertOnSelect: filterText を持たせないことで、クライアントの
@@ -395,7 +415,7 @@ local function make_completion_list()
 				range = range,
 				newText = pre_edit,
 			},
-			data = { skkelua = true, register = true },
+			data = { skkelua = true, register = true, text = pre_edit },
 		}
 		if instant_insert then
 			item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText

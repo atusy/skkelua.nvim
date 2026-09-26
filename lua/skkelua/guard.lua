@@ -12,6 +12,11 @@
 -- は何もしない) の意味論を、キーを列挙せずに特殊キー全体へ一般化したものに
 -- 相当する。キーの破棄 (コールバックが "" を返す) は Neovim 0.10+ の機能で、
 -- それ未満では返り値が無視されるため従来通りの挙動に戻るだけで害はない。
+--
+-- skkelua がマップしたキーは on_key には生のまま現れない。insert の :lmap
+-- <expr> (init.lua の map() 参照) はマッピングの評価時に打鍵が消費され、
+-- その結果 (かな・\b など) だけが流れてくる。cmdline / terminal の Lua
+-- コールバックマッピングは KE_LUA 擬似キーとして現れる。
 
 local M = {}
 
@@ -77,10 +82,10 @@ local completion_keys = key_set({ "<c-n>", "<c-p>" })
 --       辞書登録を <C-y> で確定できなくなる
 local pum_nav_keys = key_set({ "<up>", "<down>", "<pageup>", "<pagedown>", "<c-n>", "<c-p>", "<c-e>", "<c-y>" })
 
--- skkelua 自身が pre-edit の更新のために feed する制御バイト
+-- skkelua 自身が pre-edit の更新のために出力する制御バイト
 -- (<C-g>u の undo 区切り、\b による削除、改行・Tab・Esc)。
--- これらのキーをユーザーが打った場合はマップ済みキーとして KE_LUA 擬似キー
--- 側で消費されるので、生のまま許可しても防御は緩まない
+-- これらのキーをユーザーが打った場合はマップ済みキーとしてマッピングに
+-- 消費されるので、生のまま許可しても防御は緩まない
 local OWN_OUTPUT_BYTES = {
 	[0x07] = true, -- <C-g> (undo 区切り <C-g>u)
 	[0x08] = true, -- \b (pre-edit の削除)
@@ -132,9 +137,10 @@ function M._is_physical_special(key)
 	return true
 end
 
----@param key string マッピング適用後のキー。マップ済みキーは KE_LUA 擬似キー
----                   として現れるため、ここに生の特殊キーが来る = 未マップで
----                   素通りする直前ということ
+---@param key string マッピング適用後のキー。マップ済みキーは打鍵の形では
+---                   現れない (:lmap <expr> はその結果だけが、Lua コールバック
+---                   マッピングは KE_LUA 擬似キーが来る) ため、ここに生の
+---                   特殊キーが来る = 未マップで素通りする直前ということ
 ---@return string? "" を返すとそのキーは破棄される
 function M._on_key(key, _)
 	if not M._is_physical_special(key) and not M._is_hostile_control(key) then
@@ -143,6 +149,17 @@ function M._on_key(key, _)
 	local store = require("skkelua.store")
 	if not store.status.enabled then
 		return
+	end
+	local mode = vim.api.nvim_get_mode().mode
+	if key == "\30" and mode:sub(1, 1) == "i" then
+		-- i_CTRL-^ は 'iminsert' (:lmap の有効・無効) を切り替えるキーで、
+		-- skkelua が有効な間に押されるとキーが素通りするようになる。
+		-- 'iminsert' は skkelua が管理する (option.lua) ため、option.lua 自身が
+		-- 送ったもの以外は破棄する
+		if require("skkelua.option")._take_pending_ctrl_hat() then
+			return
+		end
+		return ""
 	end
 	local state = store.get_context().state
 	if state.type == "input" and state.mode == "direct" then
@@ -155,7 +172,6 @@ function M._on_key(key, _)
 	-- してしまう。通すのは補完として意味を持つキーに限る。選択挿入などで
 	-- バッファが変わるケースは既存の補完リカバリ (prevInput 不一致リセット)
 	-- が面倒を見る
-	local mode = vim.api.nvim_get_mode().mode
 	if mode:sub(1, 1) == "i" and completion_keys()[key] then
 		return
 	end
@@ -171,14 +187,29 @@ function M._on_key(key, _)
 	return ""
 end
 
+-- insert モードの文字挿入 (insertchar) は、後続の入力があると最大 100 文字を
+-- まとめて挿入する最適化をしており、その先読み (vpeekc) の時点でマッピングの
+-- 解決まで行う。skkelua の :lmap <expr> (init.lua の map() 参照) は解決 =
+-- 評価なので、前のキーの出力 (例: ▽k の k) がまだバッファに入っていない
+-- うちに次のキーの handle が走り、prevInput の不一致で状態がリセットされて
+-- しまう。この最適化は InsertCharPre の autocmd が 1 つでもあると無効に
+-- なるため、有効な間は no-op の autocmd を置いて先読みを止める
+local peek_group = "skkelua-guard-peek"
+
 --- ゲートを有効にする (同じ namespace への登録は上書きなので再入可)
 function M.attach()
 	vim.on_key(M._on_key, ns)
+	vim.api.nvim_create_autocmd("InsertCharPre", {
+		group = vim.api.nvim_create_augroup(peek_group, { clear = true }),
+		buffer = 0,
+		callback = function() end,
+	})
 end
 
 --- ゲートを無効にする
 function M.detach()
 	vim.on_key(nil, ns)
+	pcall(vim.api.nvim_del_augroup_by_name, peek_group)
 end
 
 return M
