@@ -289,6 +289,11 @@ in-process の LSP サーバー (|vim.lsp.start()| の cmd 関数) として実�
   ▽おく*る のまま補完メニューの第一候補を自動選択・挿入します。
   CTRL-P で選択を外すと変換前のひらがなに戻ります。
   insertOnSelect と併用してください
+- abbrevWithSpace (true): abbrev モード (/) の入力そのままの候補 (raw 候補)
+  の前に半角スペースを足すかどうか。true なら ▽overall で " overall"、
+  false なら "overall" が [辞書登録] の下に並びます。
+  他の SKK では abbrev モードにこの候補が出ないため、それに合わせる場合は
+  false にします
 
 変換の開始・確定を補完メニューだけで行う場合は、Space を変換に使わない
 pureSpace (|skkelua-options|) も合わせて有効にすると快適です。
@@ -323,8 +328,11 @@ pureSpace (|skkelua-options|) も合わせて有効にすると快適です。
   (送りあり入力では送り仮名が確定するまで表示されません)
 - abbrev モード (/) の入力中は、[辞書登録] の下に入力したアルファベットの
   前に半角スペースを足したものが並びます (▽overall なら " overall")。
-  この候補の確定ではユーザー辞書に登録されません。入力そのものは
-  <C-y> の無変換確定で入ります
+  abbrevWithSpace (上記) を false にすると半角スペースを足さない
+  入力そのもの (▽overall なら "overall") が並びます。
+  いずれの候補の確定でもユーザー辞書には登録されません。
+  入力そのものは abbrevWithSpace が true の場合でも <C-y> の
+  無変換確定で入力できます
 - 登録プロンプトは insert モードのバッファなので、中でも skkelua の
   かな入力と補完メニューがそのまま使えます (プロンプト内の補完に
   [辞書登録] は出ません)。<CR> で登録、<Esc> / CTRL-C でキャンセル。

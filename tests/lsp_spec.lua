@@ -653,7 +653,7 @@ t.test("abbrev input adds a space-prefixed raw candidate below [辞書登録]", 
 		labels[#labels + 1] = item.label
 	end
 	-- 辞書候補、[辞書登録] の後ろに、スペース前置形だけが並ぶ
-	-- (入力そのものは <C-y> の無変換確定で入るので候補にしない)
+	-- (completion.abbrevWithSpace = false だと半角スペース無しの入力そのままになる)
 	t.assert_equals({ "全体", "[辞書登録]", " overall" }, labels)
 	-- 並び順は sortText で保たれる (クライアントは sortText で並べ替える)
 	t.assert_equals({ "00001", "00002", "00003" }, vim.tbl_map(function(item)
@@ -691,6 +691,62 @@ t.test("abbrev keeps a dictionary candidate equal to the input and adds only the
 		labels[#labels + 1] = item.label
 	end
 	t.assert_equals({ "ov", "[辞書登録]", " ov" }, labels)
+	-- 先頭は辞書候補なので確定時に登録される (raw ではない)
+	t.assert_equals(nil, list.items[1].data.raw)
+
+	vim.cmd.bwipeout({ bang = true })
+end)
+
+t.test("completion.abbrevWithSpace=false uses the raw input without a leading space", function()
+	local skkelua = require("skkelua")
+	local lib = require("skkelua.store").get_library()
+	lib:register_henkan_result("okurinasi", "overall", "全体")
+	skkelua.config({ completion = { enabled = true, abbrevWithSpace = false } })
+	skkelua._handle_request("enable", {}, vim_status)
+
+	local pre_edit = setup_state({ "/", "o", "v", "e", "r", "a", "l", "l" })
+	t.assert_equals("▽overall", pre_edit)
+
+	local list = require("skkelua.lsp")._make_completion_list()
+	local labels = {}
+	for _, item in ipairs(list.items) do
+		labels[#labels + 1] = item.label
+	end
+	t.assert_equals({ "全体", "[辞書登録]", "overall" }, labels)
+	t.assert_equals({ "00001", "00002", "00003" }, vim.tbl_map(function(item)
+		return item.sortText
+	end, list.items))
+
+	local raw = list.items[3]
+	t.assert_equals("overall", raw.textEdit.newText)
+	t.assert_equals(true, raw.data.raw)
+
+	-- 入力そのものの候補を確定しても辞書には登録されない
+	require("skkelua.lsp")._on_complete_done("accept", {
+		user_data = { nvim = { lsp = { completion_item = { data = raw.data } } } },
+	})
+	t.assert_equals({ "全体" }, lib:get_henkan_result("okurinasi", "overall"))
+
+	vim.cmd.bwipeout({ bang = true })
+end)
+
+t.test("completion.abbrevWithSpace=false drops a raw candidate duplicated by a dictionary candidate", function()
+	local skkelua = require("skkelua")
+	local lib = require("skkelua.store").get_library()
+	-- 辞書候補が入力そのものと同じ場合は dedup され、raw 候補は並ばない
+	lib:register_henkan_result("okurinasi", "ov", "ov")
+	skkelua.config({ completion = { enabled = true, abbrevWithSpace = false } })
+	skkelua._handle_request("enable", {}, vim_status)
+
+	local pre_edit = setup_state({ "/", "o", "v" })
+	t.assert_equals("▽ov", pre_edit)
+
+	local list = require("skkelua.lsp")._make_completion_list()
+	local labels = {}
+	for _, item in ipairs(list.items) do
+		labels[#labels + 1] = item.label
+	end
+	t.assert_equals({ "ov", "[辞書登録]" }, labels)
 	-- 先頭は辞書候補なので確定時に登録される (raw ではない)
 	t.assert_equals(nil, list.items[1].data.raw)
 

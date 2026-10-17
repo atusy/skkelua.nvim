@@ -100,6 +100,14 @@ t.test("set_config validation", function()
 		skkelua.config({ useGoogleJapaneseInput = true })
 	end)
 
+	-- completion の部分指定はデフォルトへマージされる
+	skkelua.config({ completion = { abbrevWithSpace = false } })
+	t.assert_equals(false, config.completion.abbrevWithSpace)
+	t.assert_equals(false, config.completion.enabled)
+	t.assert_error(function()
+		skkelua.config({ completion = { abbrevWithSpace = "no" } })
+	end)
+
 	-- userDictionary の ~ 展開
 	skkelua.config({ userDictionary = "~/.test-skkeleton" })
 	t.assert_true(not vim.startswith(config.userDictionary, "~"))
