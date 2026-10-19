@@ -634,7 +634,7 @@ t.test("complete_callback registers the selected candidate", function()
 	vim.cmd.bwipeout({ bang = true })
 end)
 
-t.test("abbrev input adds a space-prefixed raw candidate below [辞書登録]", function()
+t.test("abbrev input adds a space-prefixed raw candidate above [辞書登録]", function()
 	local skkelua = require("skkelua")
 	local lib = require("skkelua.store").get_library()
 	lib:register_henkan_result("okurinasi", "overall", "全体")
@@ -652,15 +652,16 @@ t.test("abbrev input adds a space-prefixed raw candidate below [辞書登録]", 
 	for _, item in ipairs(list.items) do
 		labels[#labels + 1] = item.label
 	end
-	-- 辞書候補、[辞書登録] の後ろに、スペース前置形だけが並ぶ
-	-- (completion.abbrevWithSpace = false だと半角スペース無しの入力そのままになる)
-	t.assert_equals({ "全体", "[辞書登録]", " overall" }, labels)
+	-- 辞書候補の後ろ、[辞書登録] の前に、スペース前置形だけが並ぶ
+	-- (completion.abbrevWithSpace = false だと半角スペース無しの入力そのままが
+	-- [辞書登録] の後ろに並ぶ)
+	t.assert_equals({ "全体", " overall", "[辞書登録]" }, labels)
 	-- 並び順は sortText で保たれる (クライアントは sortText で並べ替える)
 	t.assert_equals({ "00001", "00002", "00003" }, vim.tbl_map(function(item)
 		return item.sortText
 	end, list.items))
 
-	local raw = list.items[3]
+	local raw = list.items[2]
 	t.assert_equals(" overall", raw.textEdit.newText)
 	t.assert_equals(true, raw.data.raw)
 
@@ -690,7 +691,7 @@ t.test("abbrev keeps a dictionary candidate equal to the input and adds only the
 	for _, item in ipairs(list.items) do
 		labels[#labels + 1] = item.label
 	end
-	t.assert_equals({ "ov", "[辞書登録]", " ov" }, labels)
+	t.assert_equals({ "ov", " ov", "[辞書登録]" }, labels)
 	-- 先頭は辞書候補なので確定時に登録される (raw ではない)
 	t.assert_equals(nil, list.items[1].data.raw)
 

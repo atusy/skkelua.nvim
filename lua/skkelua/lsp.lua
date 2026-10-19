@@ -79,7 +79,8 @@ end
 --- ユーザー辞書で確定済みの候補 (ランク持ち) を確定が新しい順に先頭へ置き、
 --- 残りは見出しの辞書順で並べる。
 --- abbrev モードでは入力の raw 候補を末尾に足す
---- (補完リストでは [辞書登録] の後ろに並ぶ)
+--- (補完リストではスペース前置形は [辞書登録] の前、
+--- abbrevWithSpace = false の入力そのままは [辞書登録] の後ろに並ぶ)
 ---@return skkelua.LspCandidate[]
 local function okurinasi_candidates()
 	local skkelua = require("skkelua")
@@ -329,8 +330,10 @@ local function make_completion_list()
 	set_completeopt(buf, auto_select)
 
 	local items = {}
-	-- abbrev の raw 候補 (入力そのもの) は辞書候補ではないので、
-	-- [辞書登録] より後ろに回す
+	-- abbrev の raw 候補のうち入力そのもの (abbrevWithSpace = false) は
+	-- 辞書候補ではないので [辞書登録] より後ろに回す。スペース前置形は
+	-- 英単語をそのまま入れる主用途なので [辞書登録] より前に置く
+	local raw_trailing = not completion_config().abbrevWithSpace
 	local trailing = {}
 	local seen = {}
 	for _, c in ipairs(candidates) do
@@ -384,7 +387,7 @@ local function make_completion_list()
 				item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet
 				item.textEdit.newText = escape_snippet(display)
 			end
-			if c.raw then
+			if c.raw and raw_trailing then
 				trailing[#trailing + 1] = item
 			else
 				items[#items + 1] = item
