@@ -58,10 +58,12 @@ M.default_indicator = default_indicator
 ---@field enabled boolean 変換候補を builtin LSP 補完として表示するかどうか
 ---@field insertOnSelect boolean 候補の選択 (フォーカス) と同時に本文へ挿入するかどうか
 ---@field deferOkuri boolean 送り仮名確定時に自動変換せず、補完メニューでの選択に委ねるかどうか
+---@field abbrevWithSpace boolean abbrev モードの raw 候補 (入力そのもの) の前に半角スペースを足すかどうか
 local default_completion = {
 	enabled = false,
 	insertOnSelect = false,
 	deferOkuri = false,
+	abbrevWithSpace = true,
 }
 
 M.default_completion = default_completion
@@ -169,6 +171,7 @@ local validators = {
 		ensure_type(merged.enabled, "boolean", "completion.enabled")
 		ensure_type(merged.insertOnSelect, "boolean", "completion.insertOnSelect")
 		ensure_type(merged.deferOkuri, "boolean", "completion.deferOkuri")
+		ensure_type(merged.abbrevWithSpace, "boolean", "completion.abbrevWithSpace")
 		return merged
 	end,
 	completionRankFile = ensure_string("completionRankFile"),

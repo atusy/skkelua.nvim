@@ -113,6 +113,7 @@ require("skkelua").config({
 		enabled = true,
 		insertOnSelect = true, -- 候補にフォーカスした時点で本文へ挿入する
 		deferOkuri = true, -- 送り仮名確定でも自動変換せず、第一候補を自動選択する
+		abbrevWithSpace = false, -- abbrev モードの候補から半角スペースを外す (既定は true)
 	},
 	pureSpace = true, -- Space を変換に使わず「変換中なら確定 + 空白」にする
 })
@@ -133,7 +134,10 @@ require("skkelua").config({
   漢字を含む単語も pum で変換しながら登録できます。辞書に無い読みでも
   この項目だけのメニューが開くので、変換キーを使わずに新しい単語を登録できます
 - abbrev モード (`/`) の入力中は、「[辞書登録]」の下に入力したアルファベットの
-  前に半角スペースを足したものが並びます (▽overall なら ` overall`)
+  前に半角スペースを足したものが並びます (▽overall なら ` overall`)。
+  `completion.abbrevWithSpace = false` にすると半角スペースを足さない
+  入力そのもの (▽overall なら `overall`) が並びます。
+  どちらも確定ではユーザー辞書に登録されません
 - skkelua の有効・無効に連動して補完も付いたり外れたりします
 
 ## skkeleton との関係

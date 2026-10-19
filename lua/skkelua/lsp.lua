@@ -72,13 +72,13 @@ end
 ---@field type skkelua.HenkanType
 ---@field affix? skkelua.AffixType
 ---@field rank? number 並び順の決定に使うランク (大きいほど上)
----@field raw? boolean 辞書由来でない候補 (abbrev の半角スペース + 入力。登録・purge の対象外)
+---@field raw? boolean 辞書由来でない候補 (abbrev の入力そのまま。completion.abbrevWithSpace で半角スペースを前置できる。登録・purge の対象外)
 
 --- 送りなし変換入力 (▽かんじ) の候補: 見出しの前方一致検索
 --- (@ddc-sources/skkeleton の gather に相当)。
 --- ユーザー辞書で確定済みの候補 (ランク持ち) を確定が新しい順に先頭へ置き、
 --- 残りは見出しの辞書順で並べる。
---- abbrev モードでは入力の半角スペース前置形を末尾に足す
+--- abbrev モードでは入力の raw 候補を末尾に足す
 --- (補完リストでは [辞書登録] の後ろに並ぶ)
 ---@return skkelua.LspCandidate[]
 local function okurinasi_candidates()
@@ -111,11 +111,13 @@ local function okurinasi_candidates()
 	end)
 	local context = require("skkelua.store").get_context()
 	if context.mode == "abbrev" then
-		-- 入力したアルファベットの前に半角スペースを足したもの (英単語を
-		-- 和文の中に空けて入れる用)。入力そのものは <C-y> の無変換確定で
-		-- 入るので候補には並べない
+		-- 入力そのものの raw 候補。completion.abbrevWithSpace (デフォルト true) だと
+		-- 前に半角スペースを足す (英単語を和文の中に空けて入れる用)。false なら
+		-- 入力そのまま (▽overall なら "overall")
 		local feed = context.state.henkanFeed
-		result[#result + 1] = { word = " " .. feed, midasi = feed, okuri = "", type = "okurinasi", raw = true }
+		local with_space = require("skkelua.config").config.completion.abbrevWithSpace
+		local word = with_space and (" " .. feed) or feed
+		result[#result + 1] = { word = word, midasi = feed, okuri = "", type = "okurinasi", raw = true }
 	end
 	return result
 end
@@ -327,7 +329,7 @@ local function make_completion_list()
 	set_completeopt(buf, auto_select)
 
 	local items = {}
-	-- abbrev の raw 候補 (半角スペース + 入力) は辞書候補ではないので、
+	-- abbrev の raw 候補 (入力そのもの) は辞書候補ではないので、
 	-- [辞書登録] より後ろに回す
 	local trailing = {}
 	local seen = {}
@@ -516,7 +518,7 @@ function M._on_complete_done(reason, completed_item)
 		end)
 		return
 	end
-	-- abbrev の raw 候補 (半角スペース + 入力) は辞書へ登録しない
+	-- abbrev の raw 候補 (入力そのもの) は辞書へ登録しない
 	if data.raw then
 		return
 	end
