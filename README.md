@@ -2,22 +2,42 @@
 
 <img width="640" height="355" alt="demo" src="https://github.com/user-attachments/assets/03a07620-4db7-495a-a526-f8b9f406fef7" />
 
-Neovim 専用の SKK 日本語入力環境です。pure Lua で実装されており、
-Neovim 組み込みの Lua ランタイムだけで動作します。
+LSP-powered yet another (sometimes bit opinionated) SKK implementation for Neovim written in pure Lua.
 
-[skkeleton](https://github.com/vim-skk/skkeleton) (denops/Deno 製) を参考に
-作られた独立のプラグインで、モードインジケータも内蔵しています。
+Lua で実装した Neovim 用の SKK 日本語入力プラグインです。
 
 ## Requirements
 
 - Neovim 0.10+
-- (任意) `google_japanese_input` ソースを使う場合は `curl`
-
-denops.vim / Deno は不要です。
+- 任意の SKK 用辞書ファイル
+	- Recommendation: https://github.com/skk-dev/dict
 
 ## Installation
 
-任意のプラグインマネージャで導入できます。
+変換候補の取得のため、SKK 用の辞書ファイルが必要になります。
+[skk-dev/dict](https://github.com/skk-dev/dict) を `$XDG_DATA_HOME/nvim/skkelua/dict` へ配置することを薦めます。
+またプラグインマネージャーは Neovim built-in の [vim.pack](https://neovim.io/doc/user/pack/#vim.pack) を推奨します。
+
+```bash
+git clone https://github.com/skk-dev/dict $XDG_DATA_HOME/nvim/skkelua/dict
+```
+
+```lua
+vim.pack.add({ 'https://github.com/kjuq/skkelua.nvim' })
+vim.keymap.set({ 'i', 'c', 't' }, '<C-j>', '<Plug>(skkelua-enable)')
+require("skkelua").config({
+	globalDictionaries = {
+		vim.fs.joinpath(vim.fn.stdpath('data'), 'skkelua', 'dict', 'SKK-JISYO.L'),
+	},
+	completionRankFile = vim.fs.joinpath(vim.fn.stdpath('state'), 'skkelua', 'rank'),
+	completion = {
+		enabled = true,
+		insertOnSelect = true,
+		deferOkuri = true, -- TODO: delete `deferOkuri`, make always defer Okuri when completion is enabled
+	},
+	pureSpace = true,
+})
+```
 
 ```lua
 -- lazy.nvim
@@ -25,48 +45,21 @@ denops.vim / Deno は不要です。
 	"kjuq/skkelua.nvim",
 	config = function()
 		require("skkelua").config({
-			globalDictionaries = { "~/.skk/SKK-JISYO.L" },
+			globalDictionaries = {
+				vim.fs.joinpath(vim.fn.stdpath('data'), 'skkelua', 'dict', 'SKK-JISYO.L'),
+				vim.fs.joinpath(vim.fn.stdpath('data'), 'skkelua', 'dict', 'SKK-JISYO.jinmei'),
+			},
 		})
-		vim.keymap.set({ "i", "c" }, "<C-j>", "<Plug>(skkelua-toggle)")
+		vim.keymap.set({ "i", "c", "t" }, "<C-j>", "<Plug>(skkelua-toggle)")
 	end,
 }
 ```
 
 ## Usage
 
-`<Plug>(skkelua-enable)` / `<Plug>(skkelua-disable)` / `<Plug>(skkelua-toggle)` を
-insert / cmdline / terminal モードにマップして使います。
+ユーザー辞書はデフォルトで `$XDG_DATA_HOME/skkelua/jisyo` に保存されます。
 
-```lua
-vim.keymap.set({ "i", "c", "t" }, "<C-j>", "<Plug>(skkelua-toggle)")
-```
-
-設定は Lua API で行います。
-
-```lua
-require("skkelua").config({
-	globalDictionaries = {
-		"~/.skk/SKK-JISYO.L",              -- エンコーディング自動判定
-		{ "~/.skk/SKK-JISYO.geo", "euc-jp" }, -- 明示指定
-	},
-	eggLikeNewline = true,
-	registerConvertResult = true,
-})
-```
-
-ユーザー辞書はデフォルトで `stdpath("data")/skkelua/jisyo`
-(通常 `~/.local/share/nvim/skkelua/jisyo`) に保存されます。
-
-insert モードのキーは `:lmap` で張られるため、マクロ (`q`) には打鍵ではなく
-変換結果の文字列が記録されます。再生時は skkelua の有効・無効や辞書の状態に
-関係なく同じ文字列が入ります (詳細は `:h skkelua-macro`)。
-
-insert に入るたび自動で skkelua を有効化する persistent mode も使えます。
-日本語を書き続ける間だけオンにしておく使い方です。
-
-```lua
-vim.keymap.set("n", "<Space>tj", "<Plug>(skkelua-persistent-toggle)")
-```
+日本語入力有効にすると、変換候補が Neovim 組み込みの補完メニューに表示されます。
 
 現在の状態は Lua API で参照できます。
 
@@ -79,95 +72,12 @@ require("skkelua").is_persistent_mode() -- persistent mode が有効かどうか
 
 詳細は [doc/skkelua.txt](doc/skkelua.txt) を参照してください。
 
-## モードインジケータ
-
-カーソル付近に現在の入力モード (ひら/カタ/英字など) をフローティング表示する
-インジケータを内蔵しています。デフォルトで有効です。
-
-```lua
-require("skkelua").config({
-	indicator = {
-		enabled = true,       -- false で無効化
-		alwaysShown = false,  -- skkelua が有効な間だけ表示
-		fadeOutMs = 0,        -- 0 で自動フェードアウトなし
-		hiraText = "ひら",    -- 表示テキストのカスタマイズ
-		border = "rounded",   -- 枠線 (nvim_open_win の border)
-	},
-})
-```
-
-デフォルト (border なし) はテキストの背景をモード色で塗り潰します。
-border を設定すると塗り潰しをやめ、枠線と文字の色 (fg) がモード色になります。
-
-ハイライトは `SkkeluaIndicatorHira` (塗り潰し) /
-`SkkeluaIndicatorHiraBorder` (border あり) などのグループで上書きできます。
-
-## 変換候補の補完表示 (builtin LSP)
-
-変換入力中 (▽かんじ) の候補を、Neovim 組み込みの補完メニューに自動表示できます。
-in-process の LSP サーバーとして実装されており、外部プロセスは起動しません。
-
-```lua
-require("skkelua").config({
-	completion = {
-		enabled = true,
-		insertOnSelect = true, -- 候補にフォーカスした時点で本文へ挿入する
-		deferOkuri = true, -- 送り仮名確定でも自動変換せず、第一候補を自動選択する
-		abbrevWithSpace = false, -- abbrev モードの候補から半角スペースを外す (既定は true)
-	},
-	pureSpace = true, -- Space を変換に使わず「変換中なら確定 + 空白」にする
-})
-```
-
-- ▽ に続けてかなを打つと、見出しを前方一致検索した変換候補が pum に出ます
-- 送りあり変換の入力中 (▽おく*r) も、送りのローマ字からありうる送り仮名を
-  展開した完成形 (送り/送る/送れ...) が候補に出ます
-- 候補選択中 (▼送る) も全候補が pum に出るので、pum から選び直せます
-- `<C-n>`/`<C-p>` で選択し、`<C-y>` で確定すると pre-edit 全体が候補に置き換わり、
-  選んだ候補はユーザー辞書へ登録されます (次回から優先されます)
-- `<C-e>` で pum を閉じた後も、`<C-n>`/`<C-p>` で開き直せます
-  (skkelua の候補を出すには `complete` に `o` を含めます)
-- 候補を未選択のまま `<C-y>` を押すと、変換せずかなのまま確定します
-- 辞書候補の後ろには常に「[辞書登録]」が並びます。確定するとフローティングの
-  登録プロンプトが開き、入力した単語がその読みで辞書に登録されます。
-  プロンプトの中でも skkelua のかな入力と補完メニューがそのまま使えるので、
-  漢字を含む単語も pum で変換しながら登録できます。辞書に無い読みでも
-  この項目だけのメニューが開くので、変換キーを使わずに新しい単語を登録できます
-- abbrev モード (`/`) の入力中は、「[辞書登録]」の下に入力したアルファベットの
-  前に半角スペースを足したものが並びます (▽overall なら ` overall`)。
-  `completion.abbrevWithSpace = false` にすると半角スペースを足さない
-  入力そのもの (▽overall なら `overall`) が並びます。
-  どちらも確定ではユーザー辞書に登録されません
-- skkelua の有効・無効に連動して補完も付いたり外れたりします
-
-## skkeleton との関係
-
-skkelua は [vim-skk/skkeleton](https://github.com/vim-skk/skkeleton) の
-TypeScript 実装を参考に Lua で書かれた別のプラグインです。
-変換エンジンの挙動・辞書形式・設定オプション名の多くは skkeleton を踏襲していますが、
-API 互換はありません (`skkeleton#*` 関数や `g:skkeleton#*` 変数は提供しません)。
-
-denops 版との主な違い:
-
-| 項目 | skkeleton | skkelua |
-|---|---|---|
-| ランタイム | Deno + denops.vim | Neovim 組み込み Lua のみ |
-| 対応エディタ | Vim / Neovim | Neovim 0.10+ のみ |
-| 設定 API | `skkeleton#config()` | `require("skkelua").config()` |
-| モードインジケータ | 別プラグイン (skkeleton_indicator.nvim) | 内蔵 |
-| ユーザー辞書デフォルト | `~/.skkeleton` | `stdpath("data")/skkelua/jisyo` |
-| 辞書ロード | 非同期 | 同期 (SKK-JISYO.L 規模で数百 ms、初回のみ) |
-| 辞書形式 | SKK/JSON/YAML/msgpack/Deno KV | SKK/JSON/msgpack |
-| 変換ごとの undo 区切り (`setUndoPoint`) | デフォルト有効 | デフォルト無効 |
-| SKK サーバー | 非同期 TCP | 同期 TCP (タイムアウト 1 秒) |
-| Google 日本語入力 | fetch | curl |
-| ddc.vim ソース | 同梱 | 非同梱 (補完用 Lua API を提供) |
-
 ## Development
 
 ```sh
 # テスト実行
-nvim --clean --headless -l tests/run.lua
+nvim --clean --headless -l tests/run.lua # or
+mise run test
 
 # 特定の spec のみ
 nvim --clean --headless -l tests/run.lua henkan
@@ -182,8 +92,5 @@ zlib license
 
 ## Credits
 
-- 変換エンジンは [vim-skk/skkeleton](https://github.com/vim-skk/skkeleton)
-  (Copyright (c) 2021 kuuote, zlib license) の TypeScript 実装を Lua に移植したものです
-- モードインジケータは
-  [delphinus/skkeleton_indicator.nvim](https://github.com/delphinus/skkeleton_indicator.nvim)
-  (Copyright (c) 2021 Yasushi Jinnouchi, zlib license) を基に内蔵化したものです
+- [vim-skk/skkeleton](https://github.com/vim-skk/skkeleton) (Copyright (c) 2021 kuuote, zlib license)
+- [delphinus/skkeleton_indicator.nvim](https://github.com/delphinus/skkeleton_indicator.nvim) (Copyright (c) 2021 Yasushi Jinnouchi, zlib license)
