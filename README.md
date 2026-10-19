@@ -2,7 +2,7 @@
 
 <img width="640" height="355" alt="demo" src="https://github.com/user-attachments/assets/03a07620-4db7-495a-a526-f8b9f406fef7" />
 
-LSP-powered yet another (sometimes bit opinionated) SKK implementation for Neovim written in pure Lua.
+LSP-powered yet another (and sometimes bit opinionated) SKK implementation for Neovim written in pure Lua.
 
 Lua で実装した Neovim 用の SKK 日本語入力プラグインです。
 
