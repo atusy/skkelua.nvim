@@ -56,6 +56,11 @@ function M.reset()
 	end
 	require("skkelua.kana")._reset()
 	require("skkelua.completion").set_adapter(nil)
+	-- 前のテストが残した LSP クライアントを持ち越さない
+	-- (builtin/外部の取り違えが、残っていたクライアントで隠れてしまう)
+	for _, client in ipairs(vim.lsp.get_clients({ name = "skkelua" })) do
+		client:stop(true)
+	end
 	require("skkelua")._reset_for_test()
 	local store = require("skkelua.store")
 	store.variables.lastMode = "hira"

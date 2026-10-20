@@ -185,7 +185,8 @@ end
 ---@param params {command: string, arguments?: table[]}
 local function execute_command(params)
 	if params.command ~= list_of.ACCEPT_COMMAND then
-		error("unknown command: " .. tostring(params.command))
+		-- level 0: クライアントへ返すエラーに位置情報を付けない
+		error("unknown command: " .. tostring(params.command), 0)
 	end
 	local data = params.arguments and params.arguments[1]
 	if not (data and data.skkelua) then
@@ -210,12 +211,16 @@ end
 -- in-process server
 --------------------------------------------------------------------
 
+--- in-process サーバーの transport (vim.lsp.start の cmd)
+---@param complete fun(params: table): table? textDocument/completion の応答。
+---   nil は応答保留 (選択挿入中のバースト)
 ---@return fun(dispatchers: table): table
-local function new_server()
+local function new_server(complete)
 	return function(dispatchers)
 		local closing = false
 		local srv = {}
-		srv.request = vim.schedule_wrap(function(method, params, handler)
+		local request_id = 0
+		local function handle(method, params, handler)
 			if method == "initialize" then
 				handler(nil, {
 					capabilities = {
@@ -227,10 +232,12 @@ local function new_server()
 					},
 				})
 			elseif method == "textDocument/completion" then
-				local list = make_completion_list()
-				-- nil は応答保留 (選択挿入中のバースト)。放置されたリクエストは
-				-- クライアントが次の trigger 時に cancel してくれる
-				if list then
+				local ok, list = pcall(complete, params)
+				if not ok then
+					handler({ code = -32603, message = tostring(list) }, nil)
+				elseif list then
+					-- nil は応答保留 (選択挿入中のバースト)。放置されたリクエストは
+					-- クライアントが次の trigger 時に cancel してくれる
 					table.insert(M._requests, { params = params, items = #list.items })
 					handler(nil, list)
 				end
@@ -239,12 +246,26 @@ local function new_server()
 				handler(not ok and { code = -32603, message = tostring(err) } or nil, nil)
 			elseif method == "shutdown" then
 				handler(nil, nil)
+			else
+				-- 応答が無いとクライアントのリクエストが残り続ける
+				handler(
+					{ code = vim.lsp.protocol.ErrorCodes.MethodNotFound, message = "method not found: " .. method },
+					nil
+				)
 			end
-		end)
+		end
+		function srv.request(method, params, handler)
+			request_id = request_id + 1
+			vim.schedule(function()
+				handle(method, params, handler)
+			end)
+			return true, request_id
+		end
 		function srv.notify(method, _)
 			if method == "exit" then
 				dispatchers.on_exit(0, 15)
 			end
+			return true
 		end
 		function srv.is_closing()
 			return closing
@@ -302,8 +323,15 @@ function M.attach()
 	local buf = vim.api.nvim_get_current_buf()
 	local client_id = vim.lsp.start({
 		name = CLIENT_NAME,
-		cmd = new_server(),
-	}, { bufnr = buf })
+		cmd = new_server(make_completion_list),
+		skkelua_builtin_completion = true,
+	}, {
+		bufnr = buf,
+		-- 外部 UI 向けの共有クライアント (start) を組み込みの補完に流用しない
+		reuse_client = function(client)
+			return client.config.skkelua_builtin_completion == true and not client:is_stopped()
+		end,
+	})
 	if not client_id then
 		return
 	end
@@ -316,6 +344,16 @@ function M.attach()
 	end
 end
 
+---@param buf integer
+---@return vim.lsp.Client?
+local function builtin_client(buf)
+	for _, client in ipairs(vim.lsp.get_clients({ name = CLIENT_NAME, bufnr = buf })) do
+		if client.config.skkelua_builtin_completion then
+			return client
+		end
+	end
+end
+
 --- 現在のバッファで補完を明示的にトリガーする。
 --- autotrigger はトリガー文字のタイプでしか働かないため、辞書登録の
 --- キャンセルなどタイプを伴わずに pre-edit が復元された時に呼ぶ
@@ -324,8 +362,7 @@ function M.trigger()
 		return
 	end
 	local buf = vim.api.nvim_get_current_buf()
-	local client = vim.lsp.get_clients({ name = CLIENT_NAME, bufnr = buf })[1]
-	if not client then
+	if not builtin_client(buf) then
 		return
 	end
 	vim.lsp.completion.get()
@@ -334,7 +371,7 @@ end
 --- 現在のバッファで補完を無効にする (skkelua-disable-post から呼ばれる)
 function M.detach()
 	local buf = vim.api.nvim_get_current_buf()
-	local client = vim.lsp.get_clients({ name = CLIENT_NAME, bufnr = buf })[1]
+	local client = builtin_client(buf)
 	if client then
 		vim.lsp.completion.enable(false, client.id, buf)
 	end
@@ -363,9 +400,79 @@ function M.setup_autocmds()
 		group = group,
 		callback = function(ev)
 			local client = vim.lsp.get_client_by_id(ev.data.client_id)
-			if client and client.name == CLIENT_NAME then
+			if client and client.config.skkelua_builtin_completion then
 				enable_completion(ev.data.client_id, ev.buf)
 			end
+		end,
+	})
+end
+
+--------------------------------------------------------------------
+-- 外部の補完 UI 向け
+--------------------------------------------------------------------
+
+--- 補完要求の位置から、読み込み済みバッファ上の入力行を引く。
+--- ドキュメントを開くことはしない。URI と入力先の対応づけは
+--- この関数が担う範囲 (バッファ名 = URI) に限る
+---@param params table textDocument/completion の params。character は UTF-8 のバイトオフセット
+---@return {line: string, row: integer, col: integer}?
+local function request_context(params)
+	local uri = vim.tbl_get(params, "textDocument", "uri")
+	local row = vim.tbl_get(params, "position", "line")
+	local col = vim.tbl_get(params, "position", "character")
+	if not (uri and row and col) then
+		return nil
+	end
+	local function matches(bufnr)
+		return vim.api.nvim_buf_is_loaded(bufnr) and vim.uri_from_bufnr(bufnr) == uri
+	end
+	-- 補完要求は打鍵ごとに届くので、多くの場合に当たる現在のバッファを先に調べ、
+	-- 仮想ドキュメントなど現在のバッファでない場合だけ全バッファを走査する。
+	-- 名前の無いバッファは全て同じ URI になるので、現在のバッファを先に調べる
+	-- ことがそのまま要求元の特定になる (他の名前無しバッファと取り違えるのは
+	-- 現在のバッファが要求元でない場合だけで、その行は pre-edit で終わらず
+	-- 候補は出ない)
+	local bufnr = vim.api.nvim_get_current_buf()
+	if not matches(bufnr) then
+		bufnr = nil
+		for _, candidate in ipairs(vim.api.nvim_list_bufs()) do
+			if matches(candidate) then
+				bufnr = candidate
+				break
+			end
+		end
+	end
+	local line = bufnr and vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+	if line then
+		return { line = line, row = row, col = col }
+	end
+end
+
+--- 外部の補完 UI が使う LSP クライアントを、バッファに一度だけ attach する。
+--- クライアントはバッファ間で共有され、SKK の有効・無効に関係なく残る。
+--- 組み込みの補完 UI は有効化しない。候補は UI 非依存の形のまま返す
+---@param bufnr? integer 省略時は現在のバッファ
+---@return integer? client_id
+function M.start(bufnr)
+	if bufnr == nil or bufnr == 0 then
+		bufnr = vim.api.nvim_get_current_buf()
+	end
+	for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr, _uninitialized = true })) do
+		if client.config.skkelua_external_completion and not client:is_stopped() then
+			return client.id
+		end
+	end
+	return vim.lsp.start({
+		name = CLIENT_NAME,
+		cmd = new_server(function(params)
+			local context = request_context(params)
+			return context and list_of.build(context) or { isIncomplete = true, items = {} }
+		end),
+		skkelua_external_completion = true,
+	}, {
+		bufnr = bufnr,
+		reuse_client = function(client)
+			return client.config.skkelua_external_completion == true and not client:is_stopped()
 		end,
 	})
 end
@@ -378,7 +485,7 @@ end
 
 --- テスト用: 任意のバッファへ attach できるトランスポート
 function M._new_server()
-	return new_server()
+	return new_server(make_completion_list)
 end
 
 --- テスト用: completion list を直接組み立てる
