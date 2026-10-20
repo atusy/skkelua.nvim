@@ -55,6 +55,7 @@ function M.reset()
 		config_mod.config[k] = v
 	end
 	require("skkelua.kana")._reset()
+	require("skkelua.completion").set_adapter(nil)
 	require("skkelua")._reset_for_test()
 	local store = require("skkelua.store")
 	store.variables.lastMode = "hira"

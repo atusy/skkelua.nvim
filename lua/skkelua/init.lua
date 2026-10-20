@@ -91,9 +91,11 @@ end
 
 ---@return string, table
 local function complete_info()
-	local state = require("skkelua.completion").state()
-	if state then
-		return "external", { pum_visible = state.visible, selected = state.selected and 0 or -1 }
+	local external, item = require("skkelua.completion").selection()
+	if external then
+		-- 外部 UI は選択中の候補だけを伝える。未選択のメニューはキー処理に
+		-- 影響しないので、メニューが無いのと同じに扱う
+		return "external", { pum_visible = item ~= nil, selected = item and 0 or -1, completion_item = item }
 	end
 	-- items は選択中の [辞書登録] 項目の判定 (handle_impl) に使う
 	return "native", vim.fn.complete_info({ "pum_visible", "selected", "items" })
@@ -262,8 +264,12 @@ local function handle_impl(opts, vim_status)
 		if completed and type(info.items) == "table" then
 			sel_item = info.items[info.selected + 1]
 		end
-		local lsp = require("skkelua.lsp")
-		local data = lsp.item_data(sel_item)
+		-- 選択中の候補を LSP の CompletionItem として扱う
+		-- (native は complete_info の items から、外部 UI はアダプターから取る)
+		local completion = require("skkelua.completion")
+		local completion_item = info.completion_item
+			or vim.tbl_get(sel_item or {}, "user_data", "nvim", "lsp", "completion_item")
+		local data = completion.item_data(completion_item)
 		if
 			vim_status.completeType == "native"
 			and data
@@ -280,7 +286,7 @@ local function handle_impl(opts, vim_status)
 			if type(handled) == "string" then
 				-- [辞書登録] 項目の確定はバッファを変えず、CompleteDone からの
 				-- registerWord が変換入力の続きとして実行されるため状態を保つ
-				if not lsp.is_register_item(sel_item) then
+				if not completion.is_register_item(completion_item) then
 					require("skkelua.mode").initialize_state_with_abbrev(context, { "converter" })
 					context.preEdit:output("")
 				end

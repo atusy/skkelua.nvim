@@ -164,11 +164,17 @@ t.test("<C-y> with cmp selection returns cmp confirm command", function()
 			return true
 		end,
 		get_active_entry = function()
-			return {}
+			return {
+				get_completion_item = function()
+					return { data = { skkelua = true } }
+				end,
+			}
 		end,
 	}
-	local ret = handle_key("<c-y>", { pum_visible = true, selected = 0 }, "external")
+	local status = require("skkelua").vim_status()
+	local ok, ret = pcall(handle_key, "<c-y>", status.completeInfo, status.completeType)
 	package.loaded["cmp"] = saved
+	assert(ok, ret)
 	t.assert_equals("<Cmd>lua require('cmp').confirm({select = true})", ret.result)
 end)
 

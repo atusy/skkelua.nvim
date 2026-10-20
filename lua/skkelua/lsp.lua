@@ -74,6 +74,17 @@ end
 ---@return string? word
 ---@return table? data 候補の data (skkelua/midasi/word/type)
 local function selected_word(before_cursor)
+	local completion = require("skkelua.completion")
+	local external, item = completion.selection()
+	if external then
+		-- 選択挿入は pre-edit を候補の文字列で置き換える。UI が実際に挿入した
+		-- 文字列は分からないので、候補の挿入文字列がカーソル前にあるかで判断する
+		local word = completion.inserted_text(item)
+		if word and word ~= "" and vim.endswith(before_cursor, word) then
+			return word, completion.item_data(item)
+		end
+		return nil
+	end
 	if vim.fn.pumvisible() == 0 then
 		return nil
 	end
@@ -88,25 +99,6 @@ local function selected_word(before_cursor)
 		return nil
 	end
 	return word, item.data
-end
-
---- complete_info() の item が skkelua の候補なら、その data を返す
----@param pum_item? table
----@return table?
-function M.item_data(pum_item)
-	local data = vim.tbl_get(pum_item or {}, "user_data", "nvim", "lsp", "completion_item", "data")
-	if type(data) == "table" and data.skkelua == true then
-		return data
-	end
-	return nil
-end
-
---- complete_info() の item が skkelua の [辞書登録] 項目かどうか
----@param pum_item? table
----@return boolean
-function M.is_register_item(pum_item)
-	local data = M.item_data(pum_item)
-	return data ~= nil and data.register == true
 end
 
 --- pum で選択中の自前候補の word が現在のカーソル前に挿入されていれば返す
