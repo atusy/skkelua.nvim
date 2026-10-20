@@ -28,16 +28,15 @@ end
 
 --- 選択中の候補だけを返すアダプター
 ---@param item table CompletionItem
----@param extra? table
-local function adapter_selecting(item, extra)
-	return vim.tbl_extend("force", {
+local function adapter_selecting(item)
+	return {
 		selected = function()
 			return item
 		end,
 		confirm = function()
 			return "external-confirm"
 		end,
-	}, extra or {})
+	}
 end
 
 t.test("<C-y> delegates confirmation to the adapter", function()
@@ -84,6 +83,19 @@ t.test("an explicit adapter takes precedence over detected UIs", function()
 	local confirm = require("skkelua.completion").confirm()
 	package.loaded["cmp"] = saved
 	t.assert_equals("external-confirm", confirm)
+end)
+
+t.test("a restored pre-edit is announced to completion UIs through a User event", function()
+	local fired = 0
+	local id = vim.api.nvim_create_autocmd("User", {
+		pattern = "skkelua-pre-edit-restored",
+		callback = function()
+			fired = fired + 1
+		end,
+	})
+	require("skkelua.lsp").pre_edit_restored()
+	vim.api.nvim_del_autocmd(id)
+	t.assert_equals(1, fired)
 end)
 
 t.test("selected_word finds the selected candidate's text before the cursor", function()
