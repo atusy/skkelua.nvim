@@ -1,8 +1,8 @@
 # skkelua.nvim
 
-<img width="640" height="355" alt="demo" src="https://github.com/user-attachments/assets/03a07620-4db7-495a-a526-f8b9f406fef7" />
+Yet Another (and sometimes a bit opinionated) LSP-powered SKK implementation for Neovim written in pure Lua
 
-LSP-powered yet another (and sometimes bit opinionated) SKK implementation for Neovim written in pure Lua.
+<img width="640" height="355" alt="demo" src="https://github.com/user-attachments/assets/03a07620-4db7-495a-a526-f8b9f406fef7" />
 
 Lua で実装した Neovim 用の SKK 日本語入力プラグインです。
 
