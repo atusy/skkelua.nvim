@@ -158,7 +158,17 @@ end)
 t.test("<C-y> with cmp selection returns cmp confirm command", function()
 	setup_henkan_input()
 
-	local ret = handle_key("<c-y>", { pum_visible = 1, selected = 1 }, "cmp")
+	local saved = package.loaded["cmp"]
+	package.loaded["cmp"] = {
+		visible = function()
+			return true
+		end,
+		get_active_entry = function()
+			return {}
+		end,
+	}
+	local ret = handle_key("<c-y>", { pum_visible = true, selected = 0 }, "external")
+	package.loaded["cmp"] = saved
 	t.assert_equals("<Cmd>lua require('cmp').confirm({select = true})", ret.result)
 end)
 
