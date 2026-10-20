@@ -4,6 +4,9 @@
 
 local M = {}
 
+--- 候補の確定時にクライアントが実行するコマンド
+M.ACCEPT_COMMAND = "skkelua.accept"
+
 local candidates_of = require("skkelua.lsp.candidates")
 
 local function completion_config()
@@ -25,6 +28,14 @@ local function register_midasi(phase)
 		return nil
 	end
 	return state.henkanFeed
+end
+
+--- 確定時に辞書学習や登録プロンプトを起動するための command を付ける。
+--- クライアントは確定した時だけ実行するため、キャンセルでは何も起きない
+---@param item table CompletionItem
+local function with_command(item)
+	item.command = { title = "skkelua", command = M.ACCEPT_COMMAND, arguments = { item.data } }
+	return item
 end
 
 --- 補完候補を組み立てる。位置は 0 始まりの UTF-8 バイトオフセット
@@ -111,6 +122,7 @@ function M.build(context)
 					text = display,
 				},
 			}
+			with_command(item)
 			if c.raw and raw_trailing then
 				trailing[#trailing + 1] = item
 			else
@@ -125,7 +137,7 @@ function M.build(context)
 	-- (登録プロンプトの中ではネストしたプロンプトが積まれる)。
 	local midasi = register_midasi(phase)
 	if midasi then
-		items[#items + 1] = {
+		items[#items + 1] = with_command({
 			label = "[辞書登録]",
 			detail = midasi,
 			kind = vim.lsp.protocol.CompletionItemKind.Text,
@@ -136,7 +148,7 @@ function M.build(context)
 				newText = pre_edit,
 			},
 			data = { skkelua = true, register = true, text = pre_edit },
-		}
+		})
 	end
 	vim.list_extend(items, trailing)
 

@@ -207,8 +207,8 @@ end
 --- 消して候補を入れるキー列を出力する。マクロには「pre-edit の削除 + 候補」
 --- だけが記録され、再生時は補完に頼らず同じ文字列が入る (<C-e> は <Cmd> の
 --- 中で pum が見えている時だけ送るので、再生時には何もしない)。
---- 確定した候補の辞書登録は native の確定 (CompleteDone) を通らないため
---- ここで行う
+--- 確定した候補の辞書登録は、native の確定 (クライアントが item.command を
+--- 実行する経路) を通らないためここで行う
 ---@param context skkelua.Context
 ---@param data table 候補の data (lsp.lua)
 ---@param word string pum の item.word (data.text が無い場合の挿入文字列)
@@ -284,8 +284,9 @@ local function handle_impl(opts, vim_status)
 		else
 			local handled = handle_complete_key(completed, vim_status.completeType, notation_str)
 			if type(handled) == "string" then
-				-- [辞書登録] 項目の確定はバッファを変えず、CompleteDone からの
-				-- registerWord が変換入力の続きとして実行されるため状態を保つ
+				-- [辞書登録] 項目の確定はバッファを変えず、候補の command
+				-- (skkelua.accept) からの registerWord が変換入力の続きとして
+				-- 実行されるため状態を保つ
 				if not completion.is_register_item(completion_item) then
 					require("skkelua.mode").initialize_state_with_abbrev(context, { "converter" })
 					context.preEdit:output("")

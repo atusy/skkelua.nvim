@@ -87,7 +87,7 @@ t.test("<C-y> with a skkelua item selected commits it with skkelua's own output"
 	t.assert_equals(REVERT_CMD .. "\b\b\b\b漢字", ret.result)
 	t.assert_equals("input", ret.state.phase)
 	t.assert_equals("", skkelua.get_pre_edit())
-	-- 確定した候補はユーザー辞書へ登録される (CompleteDone を通らないため自前で行う)
+	-- 確定した候補はユーザー辞書へ登録される (native の確定を通らないため自前で行う)
 	t.assert_equals("漢字", lib:get_henkan_result("okurinasi", "かんじ")[1])
 	t.assert_equals("漢字", require("skkelua.store").get_context().lastCandidate.candidate)
 end)
@@ -183,7 +183,8 @@ t.test("<C-y> on the selected [辞書登録] item keeps the henkan input state",
 	setup_henkan_input()
 
 	-- [辞書登録] の挿入テキストは pre-edit そのものでバッファは変わらず、
-	-- CompleteDone からの registerWord が変換入力の続きとして実行される。
+	-- 候補の command (skkelua.accept) からの registerWord が
+	-- 変換入力の続きとして実行される。
 	-- 確定キーへのパススルー時に状態をリセットしてはいけない
 	local items = {
 		{

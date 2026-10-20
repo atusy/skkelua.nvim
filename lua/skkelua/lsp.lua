@@ -1,14 +1,15 @@
--- 変換候補を Neovim builtin 補完へ流す in-process LSP サーバー
+-- 変換候補を LSP (builtin 補完・外部の補完 UI) へ流す in-process サーバー
 --
 -- 変換入力中 (▽かんじ) に、見出しを前方一致検索した変換候補を
--- textDocument/completion の結果として返す。候補を確定すると
--- CompleteDone でユーザー辞書へ登録される。
+-- textDocument/completion の結果として返す。候補を確定すると、
+-- クライアントが実行する item.command (skkelua.accept) で
+-- ユーザー辞書へ登録される。
 
 local M = {}
 
 local CLIENT_NAME = "skkelua"
 
-local candidates_of = require("skkelua.lsp.candidates")
+local list_of = require("skkelua.lsp.list")
 
 local function completion_config()
 	return require("skkelua.config").config.completion
@@ -178,6 +179,33 @@ local function make_completion_list()
 	return list
 end
 
+--- 候補の確定 (workspace/executeCommand) を処理する。
+--- クライアントは確定したときだけ item.command を実行するので、
+--- <Esc>/<C-e> などで閉じた場合は何も起きない
+---@param params {command: string, arguments?: table[]}
+local function execute_command(params)
+	if params.command ~= list_of.ACCEPT_COMMAND then
+		error("unknown command: " .. tostring(params.command))
+	end
+	local data = params.arguments and params.arguments[1]
+	if not (data and data.skkelua) then
+		return
+	end
+	if data.register then
+		-- [辞書登録] 項目: 登録プロンプトを開く。サーバーはリクエストを
+		-- vim.schedule で処理するので、補完の終了処理は既に抜けている。
+		-- 挿入テキストが pre-edit のままなので
+		-- handle 側では変換入力の続きとして registerWord が実行される
+		require("skkelua").handle("handleKey", { ["function"] = "registerWord" })
+		return
+	end
+	-- abbrev の raw 候補 (入力そのもの) は辞書へ登録しない
+	if data.raw then
+		return
+	end
+	require("skkelua").complete_callback(data.midasi, data.word, data.type)
+end
+
 --------------------------------------------------------------------
 -- in-process server
 --------------------------------------------------------------------
@@ -195,6 +223,7 @@ local function new_server()
 						completionProvider = {
 							triggerCharacters = trigger_characters(),
 						},
+						executeCommandProvider = { commands = { list_of.ACCEPT_COMMAND } },
 					},
 				})
 			elseif method == "textDocument/completion" then
@@ -205,6 +234,9 @@ local function new_server()
 					table.insert(M._requests, { params = params, items = #list.items })
 					handler(nil, list)
 				end
+			elseif method == "workspace/executeCommand" then
+				local ok, err = pcall(execute_command, params)
+				handler(not ok and { code = -32603, message = tostring(err) } or nil, nil)
 			elseif method == "shutdown" then
 				handler(nil, nil)
 			end
@@ -227,42 +259,6 @@ end
 --------------------------------------------------------------------
 -- attach / detach
 --------------------------------------------------------------------
-
---- 候補確定時にユーザー辞書へ登録する
---- (テスト用に reason と completed_item を注入できるよう分離している)
----@param reason? string v:event.reason ("accept"/"cancel"/"discard")
----@param completed_item? table v:completed_item
-function M._on_complete_done(reason, completed_item)
-	-- <Esc>/<C-e> などで確定せず閉じた場合 (cancel/discard) は登録しない。
-	-- reason が取れない環境では従来通り登録する
-	if reason ~= nil and reason ~= "accept" then
-		return
-	end
-	local item = vim.tbl_get(completed_item or {}, "user_data", "nvim", "lsp", "completion_item")
-	local data = item and item.data
-	if not (data and data.skkelua) then
-		return
-	end
-	if data.register then
-		-- [辞書登録] 項目: ins-completion の終了処理から抜けてから
-		-- 登録プロンプトを開く。挿入テキストが pre-edit のままなので
-		-- handle 側では変換入力の続きとして registerWord が実行される
-		vim.schedule(function()
-			require("skkelua").handle("handleKey", { ["function"] = "registerWord" })
-		end)
-		return
-	end
-	-- abbrev の raw 候補 (入力そのもの) は辞書へ登録しない
-	if data.raw then
-		return
-	end
-	require("skkelua").complete_callback(data.midasi, data.word, data.type)
-end
-
-local function on_complete_done()
-	M._on_complete_done(vim.tbl_get(vim.v.event, "reason"), vim.v.completed_item)
-end
-
 
 --- buffer-local 'completeopt' をグローバル値に戻す
 ---@param buf integer
@@ -296,10 +292,6 @@ local function enable_completion(client_id, buf)
 	vim.lsp.completion.enable(false, client_id, buf)
 	vim.lsp.completion.enable(true, client_id, buf, { autotrigger = true, convert = convert_item })
 	set_completeopt(buf, false)
-	vim.api.nvim_create_autocmd("CompleteDone", {
-		group = vim.api.nvim_create_augroup("skkelua-lsp-complete-done", { clear = true }),
-		callback = on_complete_done,
-	})
 end
 
 --- 現在のバッファで補完を有効にする (skkelua-enable-post から呼ばれる)
@@ -376,6 +368,17 @@ function M.setup_autocmds()
 			end
 		end,
 	})
+end
+
+--- テスト用: 確定コマンドを直接実行する
+---@param params {command: string, arguments?: table[]}
+function M._execute_command(params)
+	execute_command(params)
+end
+
+--- テスト用: 任意のバッファへ attach できるトランスポート
+function M._new_server()
+	return new_server()
 end
 
 --- テスト用: completion list を直接組み立てる
