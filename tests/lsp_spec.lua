@@ -528,6 +528,21 @@ t.test("register item is hidden while okuri is undetermined", function()
 	vim.cmd.bwipeout({ bang = true })
 end)
 
+t.test("completeopt is still prepared when a response has no items", function()
+	local skkelua = require("skkelua")
+	skkelua.config({ completion = { enabled = true, insertOnSelect = true } })
+	skkelua._handle_request("enable", {}, vim_status)
+
+	-- 辞書に無い ▽おく*r は候補も [辞書登録] も無いが、以前の応答で
+	-- 外れた noselect を戻すため buffer-local の 'completeopt' は整える
+	setup_state({ "O", "k", "u", "R" })
+	vim.bo.completeopt = "menu,popup"
+	local list = require("skkelua.lsp")._make_completion_list()
+	t.assert_equals(0, #list.items)
+	t.assert_true(vim.bo.completeopt:find("noselect", 1, true) ~= nil, vim.bo.completeopt)
+	vim.cmd.bwipeout({ bang = true })
+end)
+
 t.test("register item appears inside the prompt buffer", function()
 	local skkelua = require("skkelua")
 	skkelua.config({ completion = { enabled = true } })

@@ -123,32 +123,15 @@ end
 --- nil を返した場合は応答自体を保留する (complete() を走らせない)
 ---@return table? CompletionList
 local function make_completion_list()
-	local empty = { isIncomplete = true, items = {} }
-	local skkelua = require("skkelua")
-	local phase = skkelua.phase()
-	local supported = phase == "input:okurinasi" or phase == "input:okuriari" or phase == "henkan"
-	if not skkelua.is_enabled() or not supported then
-		return empty
-	end
-	local pre_edit = skkelua.get_pre_edit()
-	-- 変換入力中はかなが無ければ出さない (henkan は候補が引けているので不要)
-	if pre_edit == "" or (phase ~= "henkan" and skkelua.get_prefix() == "") then
-		return empty
-	end
-
-	-- カーソル前のテキストが pre-edit (▽かんじ) で終わっていることを確認し、
-	-- その開始位置を置換範囲にする。
 	-- Note: params.position は使わない。pre-edit の再描画 (BS + 再挿入) は
 	--       InsertCharPre ごとにリクエストを積むので、後発の処理時点では
 	--       バッファが先へ進んでいることがある。クライアント (builtin) も
 	--       応答を処理時点のカーソルで解釈するため、常に現在位置で組み立てる
-	local buf = vim.api.nvim_get_current_buf()
 	local pos = vim.api.nvim_win_get_cursor(0)
-	local row = pos[1] - 1
-	local col = pos[2] -- utf-8 (byte)
-	local line = (vim.api.nvim_buf_get_lines(buf, row, row + 1, false) or {})[1] or ""
-	local before_cursor = line:sub(1, col)
-	if not vim.endswith(before_cursor, pre_edit) then
+	local row, col = pos[1] - 1, pos[2] -- utf-8 (byte)
+	local line = (vim.api.nvim_buf_get_lines(0, row, row + 1, false) or {})[1] or ""
+	local list, reason = require("skkelua.lsp.list").build({ line = line, row = row, col = col })
+	if reason == "stale" then
 		-- insertOnSelect の選択挿入中 (バッファは pre-edit でなく候補 word) に
 		-- 届いた後発リクエスト。pre-edit の再描画は InsertCharPre ごとに
 		-- リクエストを積むため、選択挿入を起こした応答の後にも同じ状態への
@@ -156,30 +139,16 @@ local function make_completion_list()
 		-- 同じ候補を返し直しても complete() の再実行で typed text が候補 word に
 		-- すり替わり <C-p>/<C-e> で pre-edit に戻れなくなる。
 		-- 応答を保留して、表示中の pum と選択状態をそのまま保つ
-		if selected_word(before_cursor) then
+		if selected_word(line:sub(1, col)) then
 			return nil
 		end
-		return empty
-	end
-	local start_col = col - #pre_edit
-	local range = {
-		start = { line = row, character = start_col },
-		["end"] = { line = row, character = col },
-	}
-
-	local marker = require("skkelua.config").config.markerHenkan
-	local modify_candidate = require("skkelua.candidate").modify_candidate
-
-	local candidates
-	if phase == "input:okurinasi" then
-		candidates = candidates_of.okurinasi()
-	elseif phase == "input:okuriari" then
-		candidates = candidates_of.okuriari()
-	else
-		candidates = candidates_of.henkan()
+		return list
+	elseif reason then
+		return list
 	end
 
 	local instant_insert = completion_config().insertOnSelect
+	local pre_edit = require("skkelua").get_pre_edit()
 	-- typed text (pre-edit) に ASCII 英数字が含まれるとクライアント側の
 	-- fuzzy フィルタが有効になり、素の label ではマッチしなくなる。
 	-- その場合は label に pre-edit を前置してフィルタを通し、
@@ -189,128 +158,32 @@ local function make_completion_list()
 	-- deferOkuri で送り仮名が確定した直後 (▽おく*る) は、第一候補を
 	-- 自動選択して即挿入する (completeopt の noselect をこの応答だけ外す)
 	local auto_select = false
-	if instant_insert and phase == "input:okuriari" then
+	if instant_insert and require("skkelua").phase() == "input:okuriari" then
 		local state = require("skkelua.store").get_context().state
 		auto_select = completion_config().deferOkuri and state.feed == "" and state.okuriFeed ~= ""
 	end
-	set_completeopt(buf, auto_select)
+	set_completeopt(0, auto_select)
 
-	local items = {}
-	-- abbrev の raw 候補のうち入力そのもの (abbrevWithSpace = false) は
-	-- 辞書候補ではないので [辞書登録] より後ろに回す。スペース前置形は
-	-- 英単語をそのまま入れる主用途なので [辞書登録] より前に置く
-	local raw_trailing = not completion_config().abbrevWithSpace
-	local trailing = {}
-	local seen = {}
-	for _, c in ipairs(candidates) do
-		-- 送りありは語幹 + 送り仮名の完成形を挿入する
-		local display = (modify_candidate(c.word, c.affix) or c.word) .. c.okuri
-		if not seen[display] then
-			seen[display] = true
-			local annotation = c.word:match(";(.*)$")
-			local item = {
-				label = display,
-				labelDetails = annotation and { description = annotation } or nil,
-				detail = c.midasi,
-				kind = vim.lsp.protocol.CompletionItemKind.Text,
-				textEdit = {
-					range = range,
-					newText = display,
-				},
-				-- okuri (送り仮名の生かな) は purgeCandidate が ▽henkanFeed*okuriFeed
-				-- を組み立て直すのに使う (midasi は語幹 + 送り仮名アルファベットの
-				-- 辞書見出し形式で、そのままでは送り仮名を分離できない)。
-				-- text は確定時にバッファへ入れる文字列 (init.lua の finalize_completion)
-				data = {
-					skkelua = true,
-					midasi = c.midasi,
-					word = c.word,
-					type = c.type,
-					okuri = c.okuri,
-					raw = c.raw,
-					text = display,
-				},
-			}
-			if instant_insert then
-				-- insertOnSelect: filterText を持たせないことで、クライアントの
-				-- 挿入 word が newText (候補そのもの) になり、<C-n> での
-				-- 選択と同時に pre-edit 全体が候補へ置き換わる
-				item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText
-				if prefixed_label then
-					item.label = pre_edit .. display
-					item.data.display = display
-				end
-			else
-				-- クライアントは typed text と filterText を照合する。
-				-- 送りなし入力中は続きのかな入力で絞り込めるよう marker + 見出し、
-				-- それ以外 (送りあり入力・候補選択) は pre-edit そのもの
-				-- (絞り込みは isIncomplete の再リクエストが担う)
-				item.filterText = phase == "input:okurinasi" and (marker .. c.midasi) or pre_edit
-				-- Note: PlainText だと word が filterText に fallback した場合に
-				--       newText が適用されない (単なる再挿入になる)。
-				--       Snippet format は確定時に挿入 word を削除して
-				--       newText を展開するため、pre-edit を候補で置換できる
-				item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet
-				item.textEdit.newText = escape_snippet(display)
-			end
-			if c.raw and raw_trailing then
-				trailing[#trailing + 1] = item
-			else
-				items[#items + 1] = item
-			end
-		end
-	end
-
-	-- 新しい読みを登録する項目を辞書候補の後ろに置く (候補が無い読みでも pum が開く)。
-	-- 挿入テキストは pre-edit 自身にして、フォーカスや確定でバッファが
-	-- 変わらないようにする。確定すると CompleteDone から登録プロンプトが開く
-	-- (登録プロンプトの中ではネストしたプロンプトが積まれる)。
-	local state = require("skkelua.store").get_context().state
-	local registrable = true
-	local midasi
-	if phase == "henkan" then
-		midasi = state.word
-	elseif phase == "input:okuriari" then
-		-- 送り仮名が確定するまでは登録する読みが定まらない
-		registrable = registrable and state.feed == "" and state.okuriFeed ~= ""
-		midasi = registrable and require("skkelua.okuri").get_okuri_str(state.henkanFeed, state.okuriFeed)
-	else
-		midasi = state.henkanFeed
-	end
-	if registrable then
-		local item = {
-			label = "[辞書登録]",
-			detail = midasi,
-			kind = vim.lsp.protocol.CompletionItemKind.Text,
-			textEdit = {
-				range = range,
-				newText = pre_edit,
-			},
-			data = { skkelua = true, register = true, text = pre_edit },
-		}
+	for _, item in ipairs(list.items) do
 		if instant_insert then
-			item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText
+			-- insertOnSelect: filterText を持たせないことで、クライアントの
+			-- 挿入 word が newText (候補そのもの) になり、<C-n> での
+			-- 選択と同時に pre-edit 全体が候補へ置き換わる
+			item.filterText = nil
 			if prefixed_label then
+				item.data.display = item.label
 				item.label = pre_edit .. item.label
-				item.data.display = "[辞書登録]"
 			end
 		else
-			item.filterText = pre_edit
+			-- Note: PlainText だと word が filterText に fallback した場合に
+			--       newText が適用されない (単なる再挿入になる)。
+			--       Snippet format は確定時に挿入 word を削除して
+			--       newText を展開するため、pre-edit を候補で置換できる
 			item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet
-			item.textEdit.newText = escape_snippet(pre_edit)
+			item.textEdit.newText = escape_snippet(item.textEdit.newText)
 		end
-		items[#items + 1] = item
 	end
-	vim.list_extend(items, trailing)
-
-	-- クライアント (builtin) は sortText (無ければ label) で並べ替える。
-	-- 辞書順 (ユーザー辞書 -> グローバル辞書のマージ順) と上の配置を保つよう
-	-- 応答順の連番を振る
-	for i, item in ipairs(items) do
-		item.sortText = ("%05d"):format(i)
-	end
-
-	return { isIncomplete = true, items = items }
+	return list
 end
 
 --------------------------------------------------------------------
